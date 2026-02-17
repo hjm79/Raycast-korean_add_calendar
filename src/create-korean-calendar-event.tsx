@@ -1,4 +1,4 @@
-import { Action, ActionPanel, Form, Icon, Toast, showToast } from "@raycast/api";
+import { Action, ActionPanel, Form, Icon, LocalStorage, Toast, showToast } from "@raycast/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -14,6 +14,8 @@ interface FormValues {
   calendarId: string;
   location?: string;
 }
+
+const CALENDAR_ID_STORAGE_KEY = "selectedCalendarId";
 
 export default function Command() {
   const [sentence, setSentence] = useState("");
@@ -32,27 +34,50 @@ export default function Command() {
     return parseKoreanSchedule(sentence);
   }, [sentence]);
 
+  const persistCalendarId = useCallback((value: string) => {
+    if (value) {
+      void LocalStorage.setItem(CALENDAR_ID_STORAGE_KEY, value);
+    } else {
+      void LocalStorage.removeItem(CALENDAR_ID_STORAGE_KEY);
+    }
+  }, []);
+
+  const handleCalendarChange = useCallback(
+    (value: string) => {
+      setCalendarId(value);
+      persistCalendarId(value);
+    },
+    [persistCalendarId],
+  );
+
   const loadCalendars = useCallback(async () => {
     setIsLoadingCalendars(true);
     setCalendarLoadError(undefined);
 
     try {
       const result = await listWritableCalendars();
+      const cachedCalendarId = (await LocalStorage.getItem<string>(CALENDAR_ID_STORAGE_KEY)) ?? "";
       setCalendars(result.calendars);
       setCalendarId((current) => {
-        if (current && result.calendars.some((calendar) => calendar.id === current)) {
-          return current;
+        const currentOrCachedId = current || cachedCalendarId;
+        if (currentOrCachedId && result.calendars.some((calendar) => calendar.id === currentOrCachedId)) {
+          persistCalendarId(currentOrCachedId);
+          return currentOrCachedId;
         }
-        return result.defaultCalendarIdentifier ?? result.calendars[0]?.id ?? "";
+
+        const next = result.defaultCalendarIdentifier ?? result.calendars[0]?.id ?? "";
+        persistCalendarId(next);
+        return next;
       });
     } catch (error) {
       setCalendars([]);
       setCalendarId("");
+      persistCalendarId("");
       setCalendarLoadError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsLoadingCalendars(false);
     }
-  }, []);
+  }, [persistCalendarId]);
 
   useEffect(() => {
     void loadCalendars();
@@ -172,7 +197,7 @@ export default function Command() {
         title="캘린더"
         info="목록에서 등록할 캘린더를 선택하세요"
         value={calendarId}
-        onChange={setCalendarId}
+        onChange={handleCalendarChange}
       >
         {isLoadingCalendars ? (
           <Form.Dropdown.Item value="" title="캘린더 목록 불러오는 중..." />

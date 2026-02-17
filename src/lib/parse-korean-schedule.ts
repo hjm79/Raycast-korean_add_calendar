@@ -31,7 +31,7 @@ const PM_TOKENS = new Set(["점심", "오후", "저녁", "밤"]);
 
 // parse.rb의 정규식을 최대한 그대로 유지한다.
 const MATCHER =
-  /^((이달|이번달|담달|다음달|(내년|[0-9]{4}년){0,1} *[0-9]+월){0,1} *[0-9]+일+|오늘|내일|모레|(이번주|담주|다음주|다담주|다다음주){0,1} *([월화수목금토일](요일|욜)))( *(새벽|아침|점심|오전|오후|저녁|밤){0,1} *([0-9]+시|[0-9]+:[0-9]+) *([0-9]+분|반){0,1}){0,1}에{0,1}( *(.+)에서){0,1} */u;
+  /^((이달|이번달|담달|다음달|(내년|[0-9]{4}년){0,1} *[0-9]+월){0,1} *[0-9]+일+|오늘|내일|모레|(이번주|담주|다음주|다담주|다다음주){0,1} *([월화수목금토일](요일|욜)))( *(새벽|아침|점심|오전|오후|저녁|밤){0,1} *([0-9]+시|[0-9]+:[0-9]+) *([0-9]+분|반){0,1}){0,1}에{0,1}( *(.+?)에서){0,1} */u;
 
 export function parseKoreanSchedule(input: string, options: ParseOptions = {}): ParseResult {
   if (!input.trim()) {
@@ -183,7 +183,7 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
     day = Number.parseInt(absoluteMonthDayMatch[3], 10);
   } else if (monthModifier !== undefined && day !== undefined) {
     dateExpressionKind = "month-modifier";
-    const shiftedDate = addMonths(today, monthModifier);
+    const shiftedDate = new Date(today.getFullYear(), today.getMonth() + monthModifier, 1);
     const shiftedYear = shiftedDate.getFullYear();
     const shiftedMonth = shiftedDate.getMonth() + 1;
 
@@ -198,7 +198,8 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
   } else if (weekday !== undefined) {
     dateExpressionKind = "weekday";
     const normalizedWeekday = weekday === 0 ? 7 : weekday;
-    const offset = (weekModifier ?? 0) - today.getDay() + normalizedWeekday;
+    const currentWeekday = today.getDay() === 0 ? 7 : today.getDay();
+    const offset = (weekModifier ?? 0) - currentWeekday + normalizedWeekday;
     date = addDays(today, offset);
   } else if (dayModifier !== undefined) {
     dateExpressionKind = "day-modifier";
@@ -259,6 +260,8 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
     // 12시간 표현(오전/오후)과 24시간 표현(14:30 등)을 모두 안전하게 처리한다.
     if (ampm === "am" && hour === 12) {
       hour = 0;
+    } else if (ampmToken === "밤" && hour === 12) {
+      hour = 24;
     } else if (ampm === "pm" && hour < 12) {
       hour += 12;
     }
@@ -294,7 +297,7 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
         start = addYears(start, 1);
         end = addYears(end, 1);
       }
-    } else {
+    } else if (dateExpressionKind === "weekday" && weekModifier === undefined) {
       start = addDays(start, 7);
       end = addDays(end, 7);
     }
@@ -321,10 +324,6 @@ function addDays(date: Date, days: number): Date {
   const next = new Date(date);
   next.setDate(next.getDate() + days);
   return next;
-}
-
-function addMonths(date: Date, months: number): Date {
-  return new Date(date.getFullYear(), date.getMonth() + months, date.getDate(), 0, 0, 0, 0);
 }
 
 function addYears(date: Date, years: number): Date {
