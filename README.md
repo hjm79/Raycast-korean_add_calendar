@@ -2,6 +2,10 @@
 
 한국어 자연어 문장을 파싱해서 Apple Calendar에 일정을 등록하는 Raycast 익스텐션입니다.
 
+![raycast2x](https://github.com/user-attachments/assets/72f3dc0d-e1ec-42d8-809e-b297242b4639)
+
+
+
 ## 지원 예시
 
 - `내일 오후 3시에 회의`
@@ -20,13 +24,6 @@
 - 액션에서 `등록 후 캘린더 열기`를 선택하면 생성 직후 Calendar 앱을 해당 일정 시각으로 엽니다.
 - 최초 1회 macOS 캘린더 권한 허용이 필요합니다.
 
-## 개발
-
-```bash
-npm install
-npm run typecheck
-npm test
-```
 
 Raycast 개발 모드:
 
