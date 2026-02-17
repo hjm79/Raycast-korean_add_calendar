@@ -38,6 +38,27 @@ interface EventKitPayload {
 const execFileAsync = promisify(execFile);
 const ADD_EVENT_SCRIPT_PATH = path.join(environment.assetsPath, "add_event.swift");
 const LIST_CALENDARS_SCRIPT_PATH = path.join(environment.assetsPath, "list_calendars.swift");
+const OPEN_PAYLOAD_ENV_KEY = "RAYCAST_KOREAN_CALENDAR_OPEN_PAYLOAD";
+const OPEN_CALENDAR_SCRIPT = `
+ObjC.import("stdlib");
+
+const rawPayload = $.getenv("${OPEN_PAYLOAD_ENV_KEY}");
+if (!rawPayload) {
+  throw new Error("Missing open payload");
+}
+
+const payload = JSON.parse(ObjC.unwrap(rawPayload));
+const calendarApp = Application("Calendar");
+calendarApp.activate();
+
+try {
+  calendarApp.switchView({ to: "day view" });
+} catch (_) {
+  // switchView가 실패해도 날짜 이동은 계속 진행한다.
+}
+
+calendarApp.viewCalendar({ at: new Date(payload.startEpochMs) });
+`;
 
 export async function listWritableCalendars(): Promise<{
   calendars: WritableCalendar[];
@@ -77,6 +98,22 @@ export async function createAppleCalendarEvent(
     return { calendarName: stdout || "알 수 없음" };
   } catch (error) {
     throw new Error(`Apple Calendar에 일정을 추가하지 못했습니다: ${toErrorMessage(error)}`);
+  }
+}
+
+export async function openCalendarAtDate(date: Date): Promise<void> {
+  const payload = JSON.stringify({ startEpochMs: date.getTime() });
+
+  try {
+    await execFileAsync("osascript", ["-l", "JavaScript", "-e", OPEN_CALENDAR_SCRIPT], {
+      env: {
+        ...process.env,
+        [OPEN_PAYLOAD_ENV_KEY]: payload,
+      },
+      maxBuffer: 1024 * 1024,
+    });
+  } catch (error) {
+    throw new Error(`Calendar 앱을 열지 못했습니다: ${toErrorMessage(error)}`);
   }
 }
 

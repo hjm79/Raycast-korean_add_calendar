@@ -1,7 +1,12 @@
 import { Action, ActionPanel, Form, Icon, Toast, showToast } from "@raycast/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { createAppleCalendarEvent, listWritableCalendars, WritableCalendar } from "./lib/apple-calendar";
+import {
+  createAppleCalendarEvent,
+  listWritableCalendars,
+  openCalendarAtDate,
+  WritableCalendar,
+} from "./lib/apple-calendar";
 import { parseKoreanSchedule } from "./lib/parse-korean-schedule";
 
 interface FormValues {
@@ -53,7 +58,7 @@ export default function Command() {
     void loadCalendars();
   }, [loadCalendars]);
 
-  async function handleSubmit(values: FormValues) {
+  async function handleSubmit(values: FormValues, options: { openCalendarAfterCreate: boolean }) {
     if (!values.calendarId) {
       await showToast({
         style: Toast.Style.Failure,
@@ -93,10 +98,19 @@ export default function Command() {
         preferredCalendarIdentifier: values.calendarId,
       });
 
+      let openCalendarFailedMessage: string | undefined;
+      if (options.openCalendarAfterCreate) {
+        try {
+          await openCalendarAtDate(event.start);
+        } catch (error) {
+          openCalendarFailedMessage = error instanceof Error ? error.message : String(error);
+        }
+      }
+
       await showToast({
         style: Toast.Style.Success,
-        title: "일정 등록 완료",
-        message: `캘린더: ${result.calendarName}`,
+        title: openCalendarFailedMessage ? "일정 등록 완료 (캘린더 열기 실패)" : "일정 등록 완료",
+        message: openCalendarFailedMessage ? openCalendarFailedMessage : `캘린더: ${result.calendarName}`,
       });
 
       setSentence("");
@@ -121,7 +135,16 @@ export default function Command() {
       isLoading={isSubmitting || isLoadingCalendars}
       actions={
         <ActionPanel>
-          <Action.SubmitForm<FormValues> icon={Icon.Calendar} title="Apple Calendar에 등록" onSubmit={handleSubmit} />
+          <Action.SubmitForm<FormValues>
+            icon={Icon.Calendar}
+            title="Apple Calendar에 등록"
+            onSubmit={(values) => handleSubmit(values, { openCalendarAfterCreate: false })}
+          />
+          <Action.SubmitForm<FormValues>
+            icon={Icon.AppWindow}
+            title="등록 후 캘린더 열기"
+            onSubmit={(values) => handleSubmit(values, { openCalendarAfterCreate: true })}
+          />
           <Action icon={Icon.ArrowClockwise} title="캘린더 목록 새로고침" onAction={() => void loadCalendars()} />
         </ActionPanel>
       }
