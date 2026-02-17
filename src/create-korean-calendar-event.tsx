@@ -63,12 +63,20 @@ export default function Command() {
       return;
     }
 
-    const parsed = parseKoreanSchedule(values.sentence);
-    if (!parsed.ok) {
+    if (!parseResult) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "일정 문장 필요",
+        message: "일정 문장을 입력해 주세요.",
+      });
+      return;
+    }
+
+    if (!parseResult.ok) {
       await showToast({
         style: Toast.Style.Failure,
         title: "파싱 실패",
-        message: parsed.error,
+        message: parseResult.error,
       });
       return;
     }
@@ -77,8 +85,8 @@ export default function Command() {
     try {
       const manualLocation = values.location?.trim();
       const event = {
-        ...parsed.value,
-        location: manualLocation || parsed.value.location,
+        ...parseResult.value,
+        location: manualLocation || parseResult.value.location,
       };
 
       const result = await createAppleCalendarEvent(event, {
@@ -122,7 +130,7 @@ export default function Command() {
         id="sentence"
         title="일정 문장"
         placeholder="예) 다음주 화요일 오후 3시 반에 강남에서 팀 미팅"
-        info="parse.rb 규칙 기반 파싱"
+        info="한국어 자연어 파싱"
         value={sentence}
         onChange={setSentence}
       />

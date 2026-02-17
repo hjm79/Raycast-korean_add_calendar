@@ -11,7 +11,7 @@
 
 ## 동작 규칙
 
-- `/Users/hjm/Documents/parse.rb`의 정규식/날짜 계산 로직을 기준으로 TypeScript로 이식했습니다.
+- 기존 `parse.rb`의 정규식/날짜 계산 로직을 기준으로 TypeScript로 이식했습니다.
 - 시간이 없으면 종일 일정으로 생성합니다.
 - 파싱된 시작 시각이 이미 과거이면 7일 뒤로 보정합니다 (원본 스크립트와 동일).
 - 캘린더 저장은 `assets/add_event.swift`에서 EventKit을 직접 호출합니다.

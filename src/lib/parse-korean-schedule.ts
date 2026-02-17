@@ -106,7 +106,7 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
     }
   }
 
-  if (/^[0-9월일 ]+$/u.test(absoluteDate.trim())) {
+  if (absoluteDate && /^[0-9월일 ]+$/u.test(absoluteDate.trim())) {
     absoluteDate = absoluteDate.trim();
   } else {
     absoluteDate = undefined;
@@ -194,7 +194,10 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
   }
 
   if (hour !== undefined) {
-    if (ampm === "pm" && hour <= 12) {
+    // 12시간 표현(오전/오후)과 24시간 표현(14:30 등)을 모두 안전하게 처리한다.
+    if (ampm === "am" && hour === 12) {
+      hour = 0;
+    } else if (ampm === "pm" && hour < 12) {
       hour += 12;
     }
   } else {
