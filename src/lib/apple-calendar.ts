@@ -1,4 +1,7 @@
+import { environment } from "@raycast/api";
 import { execFile } from "node:child_process";
+import { access } from "node:fs/promises";
+import path from "node:path";
 import { promisify } from "node:util";
 
 import { ParsedSchedule } from "./parse-korean-schedule";
@@ -7,96 +10,40 @@ export interface CreateCalendarEventOptions {
   preferredCalendarName?: string;
 }
 
+interface EventKitPayload {
+  title: string;
+  startEpochMs: number;
+  endEpochMs: number;
+  location?: string;
+  allDay: boolean;
+  preferredCalendarName?: string;
+}
+
 const execFileAsync = promisify(execFile);
-
-const PAYLOAD_ENV_KEY = "RAYCAST_KOREAN_CALENDAR_PAYLOAD";
-
-const JXA_SCRIPT = `
-ObjC.import("stdlib");
-
-function isWritable(calendar) {
-  try {
-    return calendar.writable();
-  } catch (_) {
-    return false;
-  }
-}
-
-const rawPayload = $.getenv("${PAYLOAD_ENV_KEY}");
-if (!rawPayload) {
-  throw new Error("Missing event payload");
-}
-
-const payload = JSON.parse(ObjC.unwrap(rawPayload));
-const calendarApp = Application("Calendar");
-calendarApp.includeStandardAdditions = true;
-
-const writableCalendars = calendarApp.calendars().filter(isWritable);
-if (writableCalendars.length === 0) {
-  throw new Error("No writable calendar found");
-}
-
-let targetCalendar = writableCalendars[0];
-
-if (payload.preferredCalendarName) {
-  const matchedCalendar = writableCalendars.find((calendar) => {
-    try {
-      return calendar.name() === payload.preferredCalendarName;
-    } catch (_) {
-      return false;
-    }
-  });
-
-  if (matchedCalendar) {
-    targetCalendar = matchedCalendar;
-  }
-}
-
-const eventProps = {
-  summary: payload.title,
-  startDate: new Date(payload.start),
-  endDate: new Date(payload.end)
-};
-
-if (payload.location) {
-  eventProps.location = payload.location;
-}
-
-if (payload.allDay) {
-  eventProps.alldayEvent = true;
-}
-
-const createdEvent = calendarApp.Event(eventProps);
-targetCalendar.events.push(createdEvent);
-
-console.log(targetCalendar.name());
-`;
+const SWIFT_SCRIPT_NAME = "add_event.swift";
+const SWIFT_SCRIPT_PATH = path.join(environment.assetsPath, SWIFT_SCRIPT_NAME);
 
 export async function createAppleCalendarEvent(
   event: ParsedSchedule,
   options: CreateCalendarEventOptions = {},
 ): Promise<{ calendarName: string }> {
-  const payload = JSON.stringify({
+  const payload: EventKitPayload = {
     title: event.title,
-    start: event.start.toISOString(),
-    end: event.end.toISOString(),
+    startEpochMs: event.start.getTime(),
+    endEpochMs: event.end.getTime(),
     location: event.location,
     allDay: event.allDay,
     preferredCalendarName: options.preferredCalendarName,
-  });
+  };
+
+  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
 
   try {
-    const { stdout, stderr } = await execFileAsync("osascript", ["-l", "JavaScript", "-e", JXA_SCRIPT], {
-      env: {
-        ...process.env,
-        [PAYLOAD_ENV_KEY]: payload,
-      },
+    await access(SWIFT_SCRIPT_PATH);
+
+    const { stdout } = await execFileAsync("swift", [SWIFT_SCRIPT_PATH, encodedPayload], {
       maxBuffer: 1024 * 1024,
     });
-
-    if (stderr?.trim()) {
-      throw new Error(stderr.trim());
-    }
 
     return { calendarName: stdout.trim() || "알 수 없음" };
   } catch (error) {
@@ -105,6 +52,13 @@ export async function createAppleCalendarEvent(
 }
 
 function toErrorMessage(error: unknown): string {
+  if (error && typeof error === "object" && "stderr" in error) {
+    const stderr = String((error as { stderr?: string }).stderr ?? "").trim();
+    if (stderr) {
+      return stderr.replace(/^ERROR:\s*/u, "");
+    }
+  }
+
   if (error instanceof Error) {
     return error.message;
   }

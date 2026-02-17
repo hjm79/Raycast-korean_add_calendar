@@ -80,7 +80,7 @@ export default function Command() {
       <Form.TextField
         id="calendarName"
         title="캘린더 이름 (선택)"
-        placeholder="비워두면 첫 writable 캘린더"
+        placeholder="비워두면 기본 캘린더"
         info="원하는 캘린더 이름을 정확히 입력하면 해당 캘린더에 등록"
         value={calendarName}
         onChange={setCalendarName}
