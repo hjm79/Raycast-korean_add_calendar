@@ -7,10 +7,12 @@ import { parseKoreanSchedule } from "./lib/parse-korean-schedule";
 interface FormValues {
   sentence: string;
   calendarId: string;
+  location?: string;
 }
 
 export default function Command() {
   const [sentence, setSentence] = useState("");
+  const [location, setLocation] = useState("");
   const [calendarId, setCalendarId] = useState("");
   const [calendars, setCalendars] = useState<WritableCalendar[]>([]);
   const [isLoadingCalendars, setIsLoadingCalendars] = useState(true);
@@ -73,7 +75,13 @@ export default function Command() {
 
     setIsSubmitting(true);
     try {
-      const result = await createAppleCalendarEvent(parsed.value, {
+      const manualLocation = values.location?.trim();
+      const event = {
+        ...parsed.value,
+        location: manualLocation || parsed.value.location,
+      };
+
+      const result = await createAppleCalendarEvent(event, {
         preferredCalendarIdentifier: values.calendarId,
       });
 
@@ -84,6 +92,7 @@ export default function Command() {
       });
 
       setSentence("");
+      setLocation("");
     } catch (error) {
       await showToast({
         style: Toast.Style.Failure,
@@ -96,6 +105,8 @@ export default function Command() {
   }
 
   const parsedPreview = parseResult?.ok ? parseResult.value : undefined;
+  const manualLocation = location.trim();
+  const previewLocation = manualLocation || parsedPreview?.location;
 
   return (
     <Form
@@ -114,6 +125,15 @@ export default function Command() {
         info="parse.rb 규칙 기반 파싱"
         value={sentence}
         onChange={setSentence}
+      />
+
+      <Form.TextField
+        id="location"
+        title="장소 (선택)"
+        placeholder="예) 강남역 1번 출구"
+        info="입력하면 문장 파싱 장소보다 우선 적용됩니다"
+        value={location}
+        onChange={setLocation}
       />
 
       <Form.Dropdown
@@ -157,7 +177,7 @@ export default function Command() {
           <Form.Description title="제목" text={parsedPreview.title} />
           <Form.Description title="시작" text={formatDate(parsedPreview.start, parsedPreview.allDay)} />
           <Form.Description title="종료" text={formatDate(parsedPreview.end, parsedPreview.allDay)} />
-          <Form.Description title="장소" text={parsedPreview.location || "(없음)"} />
+          <Form.Description title="장소" text={previewLocation || "(없음)"} />
           <Form.Description title="유형" text={parsedPreview.allDay ? "종일" : "시간 지정"} />
         </>
       )}
