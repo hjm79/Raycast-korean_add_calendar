@@ -8,6 +8,9 @@
   "categories": [
     "Productivity"
   ],
+  "platforms": [
+    "macOS"
+  ],
   "license": "MIT",
   "commands": [
     {
