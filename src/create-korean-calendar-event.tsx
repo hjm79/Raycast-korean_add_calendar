@@ -1,17 +1,20 @@
 import { Action, ActionPanel, Form, Icon, Toast, showToast } from "@raycast/api";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { createAppleCalendarEvent } from "./lib/apple-calendar";
+import { createAppleCalendarEvent, listWritableCalendars, WritableCalendar } from "./lib/apple-calendar";
 import { parseKoreanSchedule } from "./lib/parse-korean-schedule";
 
 interface FormValues {
   sentence: string;
-  calendarName?: string;
+  calendarId: string;
 }
 
 export default function Command() {
   const [sentence, setSentence] = useState("");
-  const [calendarName, setCalendarName] = useState("");
+  const [calendarId, setCalendarId] = useState("");
+  const [calendars, setCalendars] = useState<WritableCalendar[]>([]);
+  const [isLoadingCalendars, setIsLoadingCalendars] = useState(true);
+  const [calendarLoadError, setCalendarLoadError] = useState<string | undefined>();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const parseResult = useMemo(() => {
@@ -22,7 +25,42 @@ export default function Command() {
     return parseKoreanSchedule(sentence);
   }, [sentence]);
 
+  const loadCalendars = useCallback(async () => {
+    setIsLoadingCalendars(true);
+    setCalendarLoadError(undefined);
+
+    try {
+      const result = await listWritableCalendars();
+      setCalendars(result.calendars);
+      setCalendarId((current) => {
+        if (current && result.calendars.some((calendar) => calendar.id === current)) {
+          return current;
+        }
+        return result.defaultCalendarIdentifier ?? result.calendars[0]?.id ?? "";
+      });
+    } catch (error) {
+      setCalendars([]);
+      setCalendarId("");
+      setCalendarLoadError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsLoadingCalendars(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCalendars();
+  }, [loadCalendars]);
+
   async function handleSubmit(values: FormValues) {
+    if (!values.calendarId) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "캘린더 선택 필요",
+        message: "등록할 캘린더를 먼저 선택해 주세요.",
+      });
+      return;
+    }
+
     const parsed = parseKoreanSchedule(values.sentence);
     if (!parsed.ok) {
       await showToast({
@@ -36,7 +74,7 @@ export default function Command() {
     setIsSubmitting(true);
     try {
       const result = await createAppleCalendarEvent(parsed.value, {
-        preferredCalendarName: values.calendarName?.trim() || undefined,
+        preferredCalendarIdentifier: values.calendarId,
       });
 
       await showToast({
@@ -61,10 +99,11 @@ export default function Command() {
 
   return (
     <Form
-      isLoading={isSubmitting}
+      isLoading={isSubmitting || isLoadingCalendars}
       actions={
         <ActionPanel>
           <Action.SubmitForm<FormValues> icon={Icon.Calendar} title="Apple Calendar에 등록" onSubmit={handleSubmit} />
+          <Action icon={Icon.ArrowClockwise} title="캘린더 목록 새로고침" onAction={() => void loadCalendars()} />
         </ActionPanel>
       }
     >
@@ -77,16 +116,31 @@ export default function Command() {
         onChange={setSentence}
       />
 
-      <Form.TextField
-        id="calendarName"
-        title="캘린더 이름 (선택)"
-        placeholder="비워두면 기본 캘린더"
-        info="원하는 캘린더 이름을 정확히 입력하면 해당 캘린더에 등록"
-        value={calendarName}
-        onChange={setCalendarName}
-      />
+      <Form.Dropdown
+        id="calendarId"
+        title="캘린더"
+        info="목록에서 등록할 캘린더를 선택하세요"
+        value={calendarId}
+        onChange={setCalendarId}
+      >
+        {isLoadingCalendars ? (
+          <Form.Dropdown.Item value="" title="캘린더 목록 불러오는 중..." />
+        ) : calendars.length > 0 ? (
+          calendars.map((calendar) => (
+            <Form.Dropdown.Item
+              key={calendar.id}
+              value={calendar.id}
+              title={calendar.isDefault ? `${calendar.title} (기본)` : calendar.title}
+              keywords={[calendar.sourceTitle]}
+            />
+          ))
+        ) : (
+          <Form.Dropdown.Item value="" title="선택 가능한 캘린더가 없습니다" />
+        )}
+      </Form.Dropdown>
 
       <Form.Separator />
+      {calendarLoadError && <Form.Description title="캘린더 오류" text={calendarLoadError} />}
       <Form.Description
         title="파싱 상태"
         text={

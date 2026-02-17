@@ -7,7 +7,23 @@ import { promisify } from "node:util";
 import { ParsedSchedule } from "./parse-korean-schedule";
 
 export interface CreateCalendarEventOptions {
-  preferredCalendarName?: string;
+  preferredCalendarIdentifier?: string;
+}
+
+export interface WritableCalendar {
+  id: string;
+  title: string;
+  sourceTitle: string;
+  isDefault: boolean;
+}
+
+interface ListCalendarsOutput {
+  defaultCalendarIdentifier?: string;
+  calendars: Array<{
+    id: string;
+    title: string;
+    sourceTitle: string;
+  }>;
 }
 
 interface EventKitPayload {
@@ -16,12 +32,30 @@ interface EventKitPayload {
   endEpochMs: number;
   location?: string;
   allDay: boolean;
-  preferredCalendarName?: string;
+  preferredCalendarIdentifier?: string;
 }
 
 const execFileAsync = promisify(execFile);
-const SWIFT_SCRIPT_NAME = "add_event.swift";
-const SWIFT_SCRIPT_PATH = path.join(environment.assetsPath, SWIFT_SCRIPT_NAME);
+const ADD_EVENT_SCRIPT_PATH = path.join(environment.assetsPath, "add_event.swift");
+const LIST_CALENDARS_SCRIPT_PATH = path.join(environment.assetsPath, "list_calendars.swift");
+
+export async function listWritableCalendars(): Promise<{
+  calendars: WritableCalendar[];
+  defaultCalendarIdentifier?: string;
+}> {
+  const stdout = await runSwiftScript(LIST_CALENDARS_SCRIPT_PATH);
+  const parsed = parseListCalendarsOutput(stdout);
+  const defaultCalendarIdentifier = parsed.defaultCalendarIdentifier;
+  const calendars = parsed.calendars.map((calendar) => ({
+    ...calendar,
+    isDefault: calendar.id === defaultCalendarIdentifier,
+  }));
+
+  return {
+    calendars,
+    defaultCalendarIdentifier,
+  };
+}
 
 export async function createAppleCalendarEvent(
   event: ParsedSchedule,
@@ -33,21 +67,38 @@ export async function createAppleCalendarEvent(
     endEpochMs: event.end.getTime(),
     location: event.location,
     allDay: event.allDay,
-    preferredCalendarName: options.preferredCalendarName,
+    preferredCalendarIdentifier: options.preferredCalendarIdentifier,
   };
 
   const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
 
   try {
-    await access(SWIFT_SCRIPT_PATH);
-
-    const { stdout } = await execFileAsync("swift", [SWIFT_SCRIPT_PATH, encodedPayload], {
-      maxBuffer: 1024 * 1024,
-    });
-
-    return { calendarName: stdout.trim() || "알 수 없음" };
+    const stdout = await runSwiftScript(ADD_EVENT_SCRIPT_PATH, [encodedPayload]);
+    return { calendarName: stdout || "알 수 없음" };
   } catch (error) {
     throw new Error(`Apple Calendar에 일정을 추가하지 못했습니다: ${toErrorMessage(error)}`);
+  }
+}
+
+async function runSwiftScript(scriptPath: string, args: string[] = []): Promise<string> {
+  await access(scriptPath);
+
+  const { stdout } = await execFileAsync("swift", [scriptPath, ...args], {
+    maxBuffer: 1024 * 1024,
+  });
+
+  return stdout.trim();
+}
+
+function parseListCalendarsOutput(stdout: string): ListCalendarsOutput {
+  try {
+    const parsed = JSON.parse(stdout) as ListCalendarsOutput;
+    if (!Array.isArray(parsed.calendars)) {
+      throw new Error("Invalid calendars payload");
+    }
+    return parsed;
+  } catch (error) {
+    throw new Error(`캘린더 목록 응답을 파싱하지 못했습니다: ${toErrorMessage(error)}`);
   }
 }
 

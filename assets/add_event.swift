@@ -7,7 +7,7 @@ struct Payload: Decodable {
   let endEpochMs: Double
   let location: String?
   let allDay: Bool
-  let preferredCalendarName: String?
+  let preferredCalendarIdentifier: String?
 }
 
 enum ScriptFailure: Error {
@@ -62,16 +62,16 @@ func requestEventAccess(store: EKEventStore) throws {
   }
 }
 
-func resolveCalendar(store: EKEventStore, preferredName: String?) throws -> EKCalendar {
+func resolveCalendar(store: EKEventStore, preferredIdentifier: String?) throws -> EKCalendar {
   let writableCalendars = store.calendars(for: .event).filter { $0.allowsContentModifications }
 
   guard !writableCalendars.isEmpty else {
     throw ScriptFailure.message("No writable calendar found")
   }
 
-  let trimmedName = preferredName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-  if !trimmedName.isEmpty,
-     let matched = writableCalendars.first(where: { $0.title == trimmedName })
+  let trimmedIdentifier = preferredIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+  if !trimmedIdentifier.isEmpty,
+     let matched = writableCalendars.first(where: { $0.calendarIdentifier == trimmedIdentifier })
   {
     return matched
   }
@@ -89,7 +89,7 @@ func saveEvent(payload: Payload) throws -> String {
   let store = EKEventStore()
   try requestEventAccess(store: store)
 
-  let calendar = try resolveCalendar(store: store, preferredName: payload.preferredCalendarName)
+  let calendar = try resolveCalendar(store: store, preferredIdentifier: payload.preferredCalendarIdentifier)
   let event = EKEvent(eventStore: store)
 
   event.title = payload.title
