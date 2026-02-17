@@ -22,6 +22,8 @@ export interface ParseOptions {
   defaultDurationMinutes?: number;
 }
 
+type DateExpressionKind = "absolute-with-year" | "absolute-month-day" | "month-modifier" | "weekday" | "day-modifier";
+
 const DAY_MODIFIER_TOKENS = ["오늘", "내일", "모레"] as const;
 const WEEKDAY_TOKENS = ["일", "월", "화", "수", "목", "금", "토"] as const;
 const AM_TOKENS = new Set(["새벽", "아침", "오전"]);
@@ -65,6 +67,7 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
   let month: number | undefined;
   let day: number | undefined;
   let date: Date | undefined;
+  let dateExpressionKind: DateExpressionKind | undefined;
 
   let monthModifier: number | undefined;
   let dayModifier: number | undefined;
@@ -91,6 +94,7 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
 
     const fullDateMatch = absoluteDate.match(/(내년|([0-9]{4})년) *([0-9]+)월 *([0-9]+)일/u);
     if (fullDateMatch) {
+      dateExpressionKind = "absolute-with-year";
       if (absoluteDate.includes("내년")) {
         year = today.getFullYear() + 1;
       }
@@ -173,17 +177,31 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
 
   const absoluteMonthDayMatch = absoluteDate?.match(/(([0-9]+)월){0,1} *([0-9]+)일/u);
   if (absoluteMonthDayMatch) {
+    dateExpressionKind = "absolute-month-day";
     year = today.getFullYear();
     month = Number.parseInt(absoluteMonthDayMatch[2] ?? String(today.getMonth() + 1), 10);
     day = Number.parseInt(absoluteMonthDayMatch[3], 10);
   } else if (monthModifier !== undefined && day !== undefined) {
+    dateExpressionKind = "month-modifier";
     const shiftedDate = addMonths(today, monthModifier);
-    date = new Date(shiftedDate.getFullYear(), shiftedDate.getMonth(), day);
+    const shiftedYear = shiftedDate.getFullYear();
+    const shiftedMonth = shiftedDate.getMonth() + 1;
+
+    if (!isValidDayOfMonth(shiftedYear, shiftedMonth, day)) {
+      return {
+        ok: false,
+        error: "유효하지 않은 날짜입니다. 월/일 조합을 확인해 주세요.",
+      };
+    }
+
+    date = new Date(shiftedYear, shiftedMonth - 1, day);
   } else if (weekday !== undefined) {
+    dateExpressionKind = "weekday";
     const normalizedWeekday = weekday === 0 ? 7 : weekday;
     const offset = (weekModifier ?? 0) - today.getDay() + normalizedWeekday;
     date = addDays(today, offset);
   } else if (dayModifier !== undefined) {
+    dateExpressionKind = "day-modifier";
     date = addDays(today, dayModifier);
   }
 
@@ -191,6 +209,50 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
     year = date.getFullYear();
     month = date.getMonth() + 1;
     day = date.getDate();
+  }
+
+  if (month !== undefined && (month < 1 || month > 12)) {
+    return {
+      ok: false,
+      error: "월은 1부터 12 사이로 입력해 주세요.",
+    };
+  }
+
+  if (day !== undefined && day < 1) {
+    return {
+      ok: false,
+      error: "일은 1 이상의 값으로 입력해 주세요.",
+    };
+  }
+
+  if (year !== undefined && month !== undefined && day !== undefined && !isValidDayOfMonth(year, month, day)) {
+    return {
+      ok: false,
+      error: "유효하지 않은 날짜입니다. 월/일 조합을 확인해 주세요.",
+    };
+  }
+
+  if (hour !== undefined) {
+    if (ampm && (hour < 1 || hour > 12)) {
+      return {
+        ok: false,
+        error: "오전/오후 시간은 1시부터 12시 사이로 입력해 주세요.",
+      };
+    }
+
+    if (!ampm && (hour < 0 || hour > 23)) {
+      return {
+        ok: false,
+        error: "시간은 0시부터 23시 사이로 입력해 주세요.",
+      };
+    }
+  }
+
+  if (minute !== undefined && (minute < 0 || minute > 59)) {
+    return {
+      ok: false,
+      error: "분은 0부터 59 사이로 입력해 주세요.",
+    };
   }
 
   if (hour !== undefined) {
@@ -227,8 +289,15 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
 
   const comparisonNow = hasTime ? now : today;
   if (start < comparisonNow) {
-    start = addDays(start, 7);
-    end = addDays(end, 7);
+    if (dateExpressionKind === "absolute-month-day") {
+      while (start < comparisonNow) {
+        start = addYears(start, 1);
+        end = addYears(end, 1);
+      }
+    } else {
+      start = addDays(start, 7);
+      end = addDays(end, 7);
+    }
   }
 
   return {
@@ -256,4 +325,21 @@ function addDays(date: Date, days: number): Date {
 
 function addMonths(date: Date, months: number): Date {
   return new Date(date.getFullYear(), date.getMonth() + months, date.getDate(), 0, 0, 0, 0);
+}
+
+function addYears(date: Date, years: number): Date {
+  return new Date(
+    date.getFullYear() + years,
+    date.getMonth(),
+    date.getDate(),
+    date.getHours(),
+    date.getMinutes(),
+    date.getSeconds(),
+    date.getMilliseconds(),
+  );
+}
+
+function isValidDayOfMonth(year: number, month: number, day: number): boolean {
+  const maxDay = new Date(year, month, 0).getDate();
+  return day >= 1 && day <= maxDay;
 }

@@ -80,13 +80,9 @@ describe("parseKoreanSchedule", () => {
     expectDate(result.value.start, { year: 2026, month: 2, day: 18, hour: 0, minute: 0 });
   });
 
-  it("does not double-convert 24-hour time with PM token", () => {
+  it("fails when AM/PM token is combined with 24-hour clock", () => {
     const result = parseKoreanSchedule("오늘 오후 14:30에 회의", { now: baseNow });
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-
-    expectDate(result.value.start, { year: 2026, month: 2, day: 17, hour: 14, minute: 30 });
+    expect(result.ok).toBe(false);
   });
 
   it("parses 24-hour time without AM/PM token", () => {
@@ -124,6 +120,31 @@ describe("parseKoreanSchedule", () => {
 
     expect(result.value.allDay).toBe(true);
     expectDate(result.value.start, { year: 2026, month: 3, day: 3, hour: 0, minute: 0 });
+  });
+
+  it("rolls month/day without year to next year when already past", () => {
+    const now = new Date(2026, 11, 31, 10, 0, 0, 0);
+    const result = parseKoreanSchedule("1월 1일 오후 3시에 새해 회의", { now });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expectDate(result.value.start, { year: 2027, month: 1, day: 1, hour: 15, minute: 0 });
+  });
+
+  it("fails on invalid month/day", () => {
+    const result = parseKoreanSchedule("2월 31일 오후 3시에 테스트", { now: baseNow });
+    expect(result.ok).toBe(false);
+  });
+
+  it("fails on invalid 24-hour time", () => {
+    const result = parseKoreanSchedule("오늘 24:30에 테스트", { now: baseNow });
+    expect(result.ok).toBe(false);
+  });
+
+  it("fails on invalid AM/PM hour", () => {
+    const result = parseKoreanSchedule("오늘 오후 13시에 테스트", { now: baseNow });
+    expect(result.ok).toBe(false);
   });
 });
 
