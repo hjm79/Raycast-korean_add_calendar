@@ -275,6 +275,40 @@ describe("parseKoreanSchedule", () => {
     expect(result.value.allDay).toBe(true);
     expectDate(result.value.start, { year: 2026, month: 2, day: 18, hour: 0, minute: 0 });
   });
+
+  it("parses time range with inferred meridiem for end time", () => {
+    const result = parseKoreanSchedule("내일 오후 4시부터 6시까지 회의", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.title).toBe("회의");
+    expectDate(result.value.start, { year: 2026, month: 2, day: 18, hour: 16, minute: 0 });
+    expectDate(result.value.end, { year: 2026, month: 2, day: 18, hour: 18, minute: 0 });
+  });
+
+  it("parses 24-hour time range with location", () => {
+    const result = parseKoreanSchedule("다음주 화요일 14:30부터 16:00까지 강남에서 팀 미팅", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.location).toBe("강남");
+    expect(result.value.title).toBe("팀 미팅");
+    expectDate(result.value.start, { year: 2026, month: 2, day: 24, hour: 14, minute: 30 });
+    expectDate(result.value.end, { year: 2026, month: 2, day: 24, hour: 16, minute: 0 });
+  });
+
+  it("moves end time to next day when range crosses midnight", () => {
+    const result = parseKoreanSchedule("오늘 23:00부터 01:00까지 서버 점검", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.title).toBe("서버 점검");
+    expectDate(result.value.start, { year: 2026, month: 2, day: 17, hour: 23, minute: 0 });
+    expectDate(result.value.end, { year: 2026, month: 2, day: 18, hour: 1, minute: 0 });
+  });
 });
 
 function expectDate(

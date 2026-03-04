@@ -31,7 +31,7 @@ const PM_TOKENS = new Set(["점심", "오후", "저녁", "밤"]);
 
 // parse.rb의 정규식을 최대한 그대로 유지한다.
 const MATCHER =
-  /^((이달|이번달|담달|다음달|(내년|[0-9]{4}년){0,1} *[0-9]+월){0,1} *[0-9]+일+|오늘|내일|모레|(이번주|담주|다음주|다담주|다다음주){0,1} *([월화수목금토일](요일|욜)))( *(새벽|아침|점심|오전|오후|저녁|밤){0,1} *([0-9]+시|[0-9]+:[0-9]+) *([0-9]+분|반){0,1}){0,1}(?: *(?:까지|까지는)){0,1}에{0,1}( *(.+?)에서){0,1} */u;
+  /^((이달|이번달|담달|다음달|(내년|[0-9]{4}년){0,1} *[0-9]+월){0,1} *[0-9]+일+|오늘|내일|모레|(이번주|담주|다음주|다담주|다다음주){0,1} *([월화수목금토일](요일|욜)))( *(새벽|아침|점심|오전|오후|저녁|밤){0,1} *([0-9]+시|[0-9]+:[0-9]+) *([0-9]+분|반){0,1}){0,1}( *부터 *(?:새벽|아침|점심|오전|오후|저녁|밤){0,1} *(?:[0-9]+시|[0-9]+:[0-9]+) *(?:[0-9]+분|반){0,1} *까지){0,1}(?: *(?:까지|까지는)){0,1}에{0,1}( *(.+?)에서){0,1} */u;
 
 export function parseKoreanSchedule(input: string, options: ParseOptions = {}): ParseResult {
   if (!input.trim()) {
@@ -60,8 +60,9 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
   const weekdayToken = match[5];
   const ampmToken = match[8];
   const hourToken = match[9];
-  let minuteToken: string | number = match[10] ?? "0";
-  const place = match[12]?.trim() || undefined;
+  const minuteToken: string | number = match[10] ?? "0";
+  const rangeTimeToken = match[11];
+  const place = match[13]?.trim() || undefined;
 
   let year: number | undefined;
   let month: number | undefined;
@@ -136,43 +137,44 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
     }
   }
 
-  let hour: number | undefined;
-  if (hourToken) {
-    const hourMinuteMatch = hourToken.match(/^([0-9]+):([0-9]+)$/u);
-    if (hourMinuteMatch) {
-      hour = Number.parseInt(hourMinuteMatch[1], 10);
-      minuteToken = `${hourMinuteMatch[2]}분`;
-    } else {
-      const parsedHour = Number.parseInt(hourToken.replace(/[^0-9]/g, ""), 10);
-      if (!Number.isNaN(parsedHour)) {
-        hour = parsedHour;
-      }
-    }
-  }
+  const startTime = parseTimeTokens(ampmToken, hourToken, minuteToken);
+  let hour = startTime.hour;
+  let minute = startTime.minute;
+  const ampm = startTime.ampm;
 
-  let ampm: "am" | "pm" | undefined;
-  if (typeof ampmToken === "string") {
-    if (AM_TOKENS.has(ampmToken)) {
-      ampm = "am";
-    }
-    if (PM_TOKENS.has(ampmToken)) {
-      ampm = "pm";
-    }
-  }
+  let endHour: number | undefined;
+  let endMinute: number | undefined;
+  let endAmpm: "am" | "pm" | undefined;
+  let endAmpmToken: string | undefined;
 
-  let minute: number | undefined;
-  if (typeof minuteToken === "string") {
-    if (minuteToken === "반") {
-      minute = 30;
-    } else {
-      minute = Number.parseInt(minuteToken.replace(/분/g, ""), 10);
+  if (rangeTimeToken) {
+    if (hour === undefined || minute === undefined) {
+      return {
+        ok: false,
+        error: "시간 범위는 시작 시간을 포함해 입력해 주세요. 예) 내일 오후 4시부터 6시까지 회의",
+      };
     }
-  } else {
-    minute = minuteToken;
-  }
 
-  if (minute !== undefined && Number.isNaN(minute)) {
-    minute = 0;
+    const rangeParseResult = parseRangeTimeToken(rangeTimeToken);
+    if (!rangeParseResult.ok) {
+      return {
+        ok: false,
+        error: rangeParseResult.error,
+      };
+    }
+
+    const parsedRange = rangeParseResult.value;
+    const endTime = parseTimeTokens(parsedRange.ampmToken, parsedRange.hourToken, parsedRange.minuteToken);
+    endHour = endTime.hour;
+    endMinute = endTime.minute;
+    endAmpm = endTime.ampm;
+    endAmpmToken = parsedRange.ampmToken;
+
+    // 시작 시간이 오전/오후를 명시했고 종료 시간이 미명시인 경우, 같은 오전/오후로 해석한다.
+    if (ampm !== undefined && endAmpm === undefined && ampmToken !== "밤") {
+      endAmpm = ampm;
+      endAmpmToken = ampmToken;
+    }
   }
 
   const absoluteMonthDayMatch = absoluteDate?.match(/(([0-9]+)월){0,1} *([0-9]+)일/u);
@@ -256,17 +258,39 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
     };
   }
 
-  if (hour !== undefined) {
-    // 12시간 표현(오전/오후)과 24시간 표현(14:30 등)을 모두 안전하게 처리한다.
-    if (ampm === "am" && hour === 12) {
-      hour = 0;
-    } else if (ampmToken === "밤" && hour === 12) {
-      hour = 24;
-    } else if (ampm === "pm" && hour < 12) {
-      hour += 12;
+  if (endHour !== undefined) {
+    if (endAmpm && (endHour < 1 || endHour > 12)) {
+      return {
+        ok: false,
+        error: "종료 시간의 오전/오후 표기는 1시부터 12시 사이로 입력해 주세요.",
+      };
     }
+
+    if (!endAmpm && (endHour < 0 || endHour > 23)) {
+      return {
+        ok: false,
+        error: "종료 시간은 0시부터 23시 사이로 입력해 주세요.",
+      };
+    }
+  }
+
+  if (endMinute !== undefined && (endMinute < 0 || endMinute > 59)) {
+    return {
+      ok: false,
+      error: "종료 분은 0부터 59 사이로 입력해 주세요.",
+    };
+  }
+
+  if (hour !== undefined) {
+    hour = normalizeHour(hour, ampm, ampmToken);
   } else {
     minute = undefined;
+  }
+
+  if (endHour !== undefined) {
+    endHour = normalizeHour(endHour, endAmpm, endAmpmToken);
+  } else {
+    endMinute = undefined;
   }
 
   if (year === undefined || month === undefined || day === undefined) {
@@ -284,7 +308,14 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
 
   if (hasTime) {
     start = new Date(year, month - 1, day, hour, minute, 0, 0);
-    end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+    if (endHour !== undefined && endMinute !== undefined) {
+      end = new Date(year, month - 1, day, endHour, endMinute, 0, 0);
+      if (end <= start) {
+        end = addDays(end, 1);
+      }
+    } else {
+      end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+    }
   } else {
     start = new Date(year, month - 1, day, 0, 0, 0, 0);
     end = addDays(start, 1);
@@ -314,6 +345,112 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
       source: scheduleString,
     },
   };
+}
+
+function parseTimeTokens(
+  ampmToken: string | undefined,
+  hourToken: string | undefined,
+  minuteToken: string | number,
+): {
+  hour: number | undefined;
+  minute: number | undefined;
+  ampm: "am" | "pm" | undefined;
+} {
+  let hour: number | undefined;
+  let parsedMinuteToken: string | number = minuteToken;
+
+  if (hourToken) {
+    const hourMinuteMatch = hourToken.match(/^([0-9]+):([0-9]+)$/u);
+    if (hourMinuteMatch) {
+      hour = Number.parseInt(hourMinuteMatch[1], 10);
+      parsedMinuteToken = `${hourMinuteMatch[2]}분`;
+    } else {
+      const parsedHour = Number.parseInt(hourToken.replace(/[^0-9]/g, ""), 10);
+      if (!Number.isNaN(parsedHour)) {
+        hour = parsedHour;
+      }
+    }
+  }
+
+  let ampm: "am" | "pm" | undefined;
+  if (typeof ampmToken === "string") {
+    if (AM_TOKENS.has(ampmToken)) {
+      ampm = "am";
+    }
+    if (PM_TOKENS.has(ampmToken)) {
+      ampm = "pm";
+    }
+  }
+
+  let minute: number | undefined;
+  if (hour !== undefined) {
+    if (typeof parsedMinuteToken === "string") {
+      if (parsedMinuteToken === "반") {
+        minute = 30;
+      } else {
+        minute = Number.parseInt(parsedMinuteToken.replace(/분/g, ""), 10);
+      }
+    } else {
+      minute = parsedMinuteToken;
+    }
+  }
+
+  if (minute !== undefined && Number.isNaN(minute)) {
+    minute = 0;
+  }
+
+  return {
+    hour,
+    minute,
+    ampm,
+  };
+}
+
+function parseRangeTimeToken(rangeTimeToken: string):
+  | {
+      ok: true;
+      value: {
+        ampmToken: string | undefined;
+        hourToken: string;
+        minuteToken: string | number;
+      };
+    }
+  | {
+      ok: false;
+      error: string;
+    } {
+  const rangeMatch = rangeTimeToken.match(
+    /^\s*부터\s*(새벽|아침|점심|오전|오후|저녁|밤){0,1}\s*([0-9]+시|[0-9]+:[0-9]+)\s*([0-9]+분|반){0,1}\s*까지\s*$/u,
+  );
+
+  if (!rangeMatch) {
+    return {
+      ok: false,
+      error: "시간 범위를 인식하지 못했습니다. 예) 내일 오후 4시부터 6시까지 회의",
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      ampmToken: rangeMatch[1],
+      hourToken: rangeMatch[2],
+      minuteToken: rangeMatch[3] ?? "0",
+    },
+  };
+}
+
+function normalizeHour(hour: number, ampm: "am" | "pm" | undefined, ampmToken: string | undefined): number {
+  if (ampm === "am" && hour === 12) {
+    return 0;
+  }
+  if (ampmToken === "밤" && hour === 12) {
+    return 24;
+  }
+  if (ampm === "pm" && hour < 12) {
+    return hour + 12;
+  }
+  return hour;
 }
 
 function startOfDay(date: Date): Date {
