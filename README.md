@@ -1,6 +1,6 @@
 # Korean Add Calendar (Raycast)
 
-한국어 자연어 문장을 파싱해서 Apple Calendar에 일정을 등록하는 Raycast 익스텐션입니다.
+한국어 자연어 문장을 파싱해서 Apple Calendar 일정 또는 미리알림에 항목을 등록하는 Raycast 익스텐션입니다.
 
 ![raycast2x](https://github.com/user-attachments/assets/72f3dc0d-e1ec-42d8-809e-b297242b4639)
 
@@ -16,13 +16,15 @@
 ## 동작 규칙
 
 - 시간이 없으면 종일 일정으로 생성합니다.
-- 파싱된 시작 시각이 이미 과거이면 7일 뒤로 보정합니다 (원본 스크립트와 동일).
-- 캘린더 저장은 `assets/add_event.swift`에서 EventKit을 직접 호출합니다.
-- 등록 캘린더는 EventKit으로 불러온 목록에서 선택합니다.
-- 마지막으로 선택한 캘린더를 저장해 다음 실행 때 자동 복원합니다.
+- 파싱된 시작 시각이 이미 과거인 경우, 요일만 입력한 표현(예: `월요일 3시`)은 다음 주로 보정합니다.
+- 일정 저장은 `assets/add_event.swift`에서 EventKit을 직접 호출합니다.
+- 미리알림 저장은 `assets/add_reminder.swift`에서 EventKit을 직접 호출합니다.
+- 등록 대상을 `캘린더` 또는 `미리알림`으로 선택할 수 있습니다.
+- 캘린더/미리알림 폴더는 EventKit으로 불러온 목록에서 선택합니다.
+- 마지막으로 선택한 캘린더/미리알림 폴더를 저장해 다음 실행 때 자동 복원합니다.
 - 장소는 별도 입력칸으로 직접 지정할 수 있고, 입력 시 문장 파싱 장소보다 우선합니다.
 - 액션에서 `등록 후 캘린더 열기`를 선택하면 생성 직후 Calendar 앱을 해당 일정 시각으로 엽니다.
-- 최초 1회 macOS 캘린더 권한 허용이 필요합니다.
+- 최초 1회 macOS 캘린더/미리알림 권한 허용이 필요합니다.
 
 
 Raycast 개발 모드:
@@ -30,4 +32,3 @@ Raycast 개발 모드:
 ```bash
 npx ray develop
 ```
-

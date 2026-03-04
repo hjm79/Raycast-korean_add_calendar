@@ -10,7 +10,18 @@ export interface CreateCalendarEventOptions {
   preferredCalendarIdentifier?: string;
 }
 
+export interface CreateReminderOptions {
+  preferredReminderCalendarIdentifier?: string;
+}
+
 export interface WritableCalendar {
+  id: string;
+  title: string;
+  sourceTitle: string;
+  isDefault: boolean;
+}
+
+export interface WritableReminderList {
   id: string;
   title: string;
   sourceTitle: string;
@@ -26,6 +37,15 @@ interface ListCalendarsOutput {
   }>;
 }
 
+interface ListReminderListsOutput {
+  defaultReminderListIdentifier?: string;
+  reminderLists: Array<{
+    id: string;
+    title: string;
+    sourceTitle: string;
+  }>;
+}
+
 interface EventKitPayload {
   title: string;
   startEpochMs: number;
@@ -35,9 +55,19 @@ interface EventKitPayload {
   preferredCalendarIdentifier?: string;
 }
 
+interface ReminderPayload {
+  title: string;
+  dueEpochMs: number;
+  allDay: boolean;
+  notes?: string;
+  preferredReminderCalendarIdentifier?: string;
+}
+
 const execFileAsync = promisify(execFile);
 const ADD_EVENT_SCRIPT_PATH = path.join(environment.assetsPath, "add_event.swift");
 const LIST_CALENDARS_SCRIPT_PATH = path.join(environment.assetsPath, "list_calendars.swift");
+const ADD_REMINDER_SCRIPT_PATH = path.join(environment.assetsPath, "add_reminder.swift");
+const LIST_REMINDER_LISTS_SCRIPT_PATH = path.join(environment.assetsPath, "list_reminder_lists.swift");
 const OPEN_PAYLOAD_ENV_KEY = "RAYCAST_KOREAN_CALENDAR_OPEN_PAYLOAD";
 const OPEN_CALENDAR_SCRIPT = `
 ObjC.import("stdlib");
@@ -78,6 +108,24 @@ export async function listWritableCalendars(): Promise<{
   };
 }
 
+export async function listWritableReminderLists(): Promise<{
+  reminderLists: WritableReminderList[];
+  defaultReminderListIdentifier?: string;
+}> {
+  const stdout = await runSwiftScript(LIST_REMINDER_LISTS_SCRIPT_PATH);
+  const parsed = parseListReminderListsOutput(stdout);
+  const defaultReminderListIdentifier = parsed.defaultReminderListIdentifier;
+  const reminderLists = parsed.reminderLists.map((reminderList) => ({
+    ...reminderList,
+    isDefault: reminderList.id === defaultReminderListIdentifier,
+  }));
+
+  return {
+    reminderLists,
+    defaultReminderListIdentifier,
+  };
+}
+
 export async function createAppleCalendarEvent(
   event: ParsedSchedule,
   options: CreateCalendarEventOptions = {},
@@ -98,6 +146,28 @@ export async function createAppleCalendarEvent(
     return { calendarName: stdout || "알 수 없음" };
   } catch (error) {
     throw new Error(`Apple Calendar에 일정을 추가하지 못했습니다: ${toErrorMessage(error)}`);
+  }
+}
+
+export async function createAppleReminder(
+  reminder: ParsedSchedule,
+  options: CreateReminderOptions = {},
+): Promise<{ reminderListName: string }> {
+  const payload: ReminderPayload = {
+    title: reminder.title,
+    dueEpochMs: reminder.start.getTime(),
+    allDay: reminder.allDay,
+    notes: reminder.location ? `장소: ${reminder.location}` : undefined,
+    preferredReminderCalendarIdentifier: options.preferredReminderCalendarIdentifier,
+  };
+
+  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
+
+  try {
+    const stdout = await runSwiftScript(ADD_REMINDER_SCRIPT_PATH, [encodedPayload]);
+    return { reminderListName: stdout || "알 수 없음" };
+  } catch (error) {
+    throw new Error(`미리알림에 항목을 추가하지 못했습니다: ${toErrorMessage(error)}`);
   }
 }
 
@@ -136,6 +206,18 @@ function parseListCalendarsOutput(stdout: string): ListCalendarsOutput {
     return parsed;
   } catch (error) {
     throw new Error(`캘린더 목록 응답을 파싱하지 못했습니다: ${toErrorMessage(error)}`);
+  }
+}
+
+function parseListReminderListsOutput(stdout: string): ListReminderListsOutput {
+  try {
+    const parsed = JSON.parse(stdout) as ListReminderListsOutput;
+    if (!Array.isArray(parsed.reminderLists)) {
+      throw new Error("Invalid reminder lists payload");
+    }
+    return parsed;
+  } catch (error) {
+    throw new Error(`미리알림 폴더 목록 응답을 파싱하지 못했습니다: ${toErrorMessage(error)}`);
   }
 }
 
