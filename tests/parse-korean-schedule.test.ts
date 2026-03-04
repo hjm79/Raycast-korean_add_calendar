@@ -254,6 +254,27 @@ describe("parseKoreanSchedule", () => {
 
     expectDate(result.value.start, { year: 2026, month: 3, day: 1, hour: 13, minute: 0 });
   });
+
+  it("parses deadline marker '까지' without polluting title", () => {
+    const result = parseKoreanSchedule("내일 오후6시까지 떡뽁이 구매", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.title).toBe("떡뽁이 구매");
+    expectDate(result.value.start, { year: 2026, month: 2, day: 18, hour: 18, minute: 0 });
+  });
+
+  it("parses day-level deadline marker '내일까지'", () => {
+    const result = parseKoreanSchedule("내일까지 보고서 제출", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.title).toBe("보고서 제출");
+    expect(result.value.allDay).toBe(true);
+    expectDate(result.value.start, { year: 2026, month: 2, day: 18, hour: 0, minute: 0 });
+  });
 });
 
 function expectDate(
