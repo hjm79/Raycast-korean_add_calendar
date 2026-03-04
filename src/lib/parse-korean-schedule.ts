@@ -22,7 +22,14 @@ export interface ParseOptions {
   defaultDurationMinutes?: number;
 }
 
-type DateExpressionKind = "absolute-with-year" | "absolute-month-day" | "month-modifier" | "weekday" | "day-modifier";
+type DateExpressionKind =
+  | "absolute-with-year"
+  | "absolute-month-day"
+  | "month-modifier"
+  | "weekday"
+  | "day-modifier"
+  | "relative-days-within"
+  | "week-within";
 
 const DAY_MODIFIER_TOKENS = ["오늘", "내일", "모레"] as const;
 const WEEKDAY_TOKENS = ["일", "월", "화", "수", "목", "금", "토"] as const;
@@ -31,7 +38,7 @@ const PM_TOKENS = new Set(["점심", "오후", "저녁", "밤"]);
 
 // parse.rb의 정규식을 최대한 그대로 유지한다.
 const MATCHER =
-  /^((이달|이번달|담달|다음달|(내년|[0-9]{4}년){0,1} *[0-9]+월){0,1} *[0-9]+일+|오늘|내일|모레|(이번주|담주|다음주|다담주|다다음주){0,1} *([월화수목금토일](요일|욜)))( *(새벽|아침|점심|오전|오후|저녁|밤){0,1} *([0-9]+시|[0-9]+:[0-9]+) *([0-9]+분|반){0,1}){0,1}( *부터 *(?:새벽|아침|점심|오전|오후|저녁|밤){0,1} *(?:[0-9]+시|[0-9]+:[0-9]+) *(?:[0-9]+분|반){0,1} *까지){0,1}(?: *(?:까지|까지는)){0,1}에{0,1}( *(.+?)에서){0,1} */u;
+  /^((이달|이번달|담달|다음달|(내년|[0-9]{4}년){0,1} *[0-9]+월){0,1} *[0-9]+일+(?! *(?:안에|이내|내))|[0-9]+일 *(?:안에|이내|내)|오늘|내일|모레|(?:이번주|담주|다음주|다담주|다다음주) *내|(이번주|담주|다음주|다담주|다다음주){0,1} *([월화수목금토일](요일|욜)))( *(새벽|아침|점심|오전|오후|저녁|밤){0,1} *([0-9]+시|[0-9]+:[0-9]+) *([0-9]+분|반){0,1}){0,1}( *부터 *(?:새벽|아침|점심|오전|오후|저녁|밤){0,1} *(?:[0-9]+시|[0-9]+:[0-9]+) *(?:[0-9]+분|반){0,1} *까지){0,1}(?: *(?:까지|까지는|전까지|전에|전|이전까지|이전)){0,1}(?: *부터){0,1}에{0,1}( *(.+?)에서){0,1} */u;
 
 export function parseKoreanSchedule(input: string, options: ParseOptions = {}): ParseResult {
   if (!input.trim()) {
@@ -72,8 +79,20 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
 
   let monthModifier: number | undefined;
   let dayModifier: number | undefined;
+  let relativeWithinDays: number | undefined;
+  let weekWithinModifier: number | undefined;
 
   if (absoluteDate) {
+    const relativeWithinDaysMatch = absoluteDate.match(/^([0-9]+)일 *(안에|이내|내)$/u);
+    if (relativeWithinDaysMatch) {
+      relativeWithinDays = Number.parseInt(relativeWithinDaysMatch[1], 10);
+    }
+
+    const weekWithinMatch = absoluteDate.match(/^(이번주|담주|다음주|다담주|다다음주) *내$/u);
+    if (weekWithinMatch) {
+      weekWithinModifier = getWeekModifierDays(weekWithinMatch[1]);
+    }
+
     if (/(오늘|내일|모레)/u.test(absoluteDate)) {
       const modifierIndex = DAY_MODIFIER_TOKENS.findIndex((token) => token === absoluteDate);
       dayModifier = modifierIndex >= 0 ? modifierIndex : undefined;
@@ -117,16 +136,7 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
     absoluteDate = undefined;
   }
 
-  let weekModifier: number | undefined;
-  if (weekModifierToken === "이번주") {
-    weekModifier = 0;
-  }
-  if (weekModifierToken === "담주" || weekModifierToken === "다음주") {
-    weekModifier = 7;
-  }
-  if (weekModifierToken === "다담주" || weekModifierToken === "다다음주") {
-    weekModifier = 14;
-  }
+  const weekModifier = getWeekModifierDays(weekModifierToken);
 
   let weekday: number | undefined;
   if (weekdayToken) {
@@ -177,12 +187,27 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
     }
   }
 
+  if (relativeWithinDays !== undefined && (Number.isNaN(relativeWithinDays) || relativeWithinDays < 1)) {
+    return {
+      ok: false,
+      error: "상대 일수는 1일 이상으로 입력해 주세요. 예) 3일 안에",
+    };
+  }
+
   const absoluteMonthDayMatch = absoluteDate?.match(/(([0-9]+)월){0,1} *([0-9]+)일/u);
   if (absoluteMonthDayMatch) {
     dateExpressionKind = "absolute-month-day";
     year = today.getFullYear();
     month = Number.parseInt(absoluteMonthDayMatch[2] ?? String(today.getMonth() + 1), 10);
     day = Number.parseInt(absoluteMonthDayMatch[3], 10);
+  } else if (relativeWithinDays !== undefined) {
+    dateExpressionKind = "relative-days-within";
+    date = addDays(today, relativeWithinDays);
+  } else if (weekWithinModifier !== undefined) {
+    dateExpressionKind = "week-within";
+    const currentWeekday = today.getDay() === 0 ? 7 : today.getDay();
+    const offset = weekWithinModifier + (7 - currentWeekday);
+    date = addDays(today, offset);
   } else if (monthModifier !== undefined && day !== undefined) {
     dateExpressionKind = "month-modifier";
     const shiftedDate = new Date(today.getFullYear(), today.getMonth() + monthModifier, 1);
@@ -451,6 +476,19 @@ function normalizeHour(hour: number, ampm: "am" | "pm" | undefined, ampmToken: s
     return hour + 12;
   }
   return hour;
+}
+
+function getWeekModifierDays(token: string | undefined): number | undefined {
+  if (token === "이번주") {
+    return 0;
+  }
+  if (token === "담주" || token === "다음주") {
+    return 7;
+  }
+  if (token === "다담주" || token === "다다음주") {
+    return 14;
+  }
+  return undefined;
 }
 
 function startOfDay(date: Date): Date {
