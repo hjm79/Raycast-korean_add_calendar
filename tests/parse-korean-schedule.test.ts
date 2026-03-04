@@ -192,6 +192,68 @@ describe("parseKoreanSchedule", () => {
     const result = parseKoreanSchedule("오늘 오후 13시에 테스트", { now: baseNow });
     expect(result.ok).toBe(false);
   });
+
+  // ── parse.rb 호환 패턴 테스트 ──
+
+  it("parses 모레 (day after tomorrow)", () => {
+    const result = parseKoreanSchedule("모레 오전 10시에 병원", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.title).toBe("병원");
+    expectDate(result.value.start, { year: 2026, month: 2, day: 19, hour: 10, minute: 0 });
+  });
+
+  it("parses 이번달 N일 (this month)", () => {
+    const result = parseKoreanSchedule("이번달 25일 오후 2시에 정기점검", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expectDate(result.value.start, { year: 2026, month: 2, day: 25, hour: 14, minute: 0 });
+  });
+
+  it("parses 이달 N일 (this month alternate)", () => {
+    const result = parseKoreanSchedule("이달 20일 팀 워크숍", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.allDay).toBe(true);
+    expectDate(result.value.start, { year: 2026, month: 2, day: 20, hour: 0, minute: 0 });
+  });
+
+  it("parses 다담주 (2 weeks from now)", () => {
+    const result = parseKoreanSchedule("다담주 수요일 오후 3시에 면접", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.title).toBe("면접");
+    // baseNow is Tue 2/17, 다담주 수요일 = +14 - 2(tue) + 3(wed) = +15 => 3/4
+    expectDate(result.value.start, { year: 2026, month: 3, day: 4, hour: 15, minute: 0 });
+  });
+
+  it("parses 다다음주 (2 weeks from now alternate)", () => {
+    const result = parseKoreanSchedule("다다음주 금요일 오전 9시에 출장", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.title).toBe("출장");
+    // baseNow is Tue 2/17, 다다음주 금요일 = +14 - 2(tue) + 5(fri) = +17 => 3/6
+    expectDate(result.value.start, { year: 2026, month: 3, day: 6, hour: 9, minute: 0 });
+  });
+
+  it("parses 담달 N일 (next month alternate)", () => {
+    const result = parseKoreanSchedule("담달 1일 오후 1시에 월간 보고", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expectDate(result.value.start, { year: 2026, month: 3, day: 1, hour: 13, minute: 0 });
+  });
 });
 
 function expectDate(
