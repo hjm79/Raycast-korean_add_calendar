@@ -5,6 +5,7 @@ export interface ParsedSchedule {
   allDay: boolean;
   location?: string;
   source: string;
+  intent: "event" | "deadline";
 }
 
 export type ParseResult =
@@ -39,6 +40,10 @@ const PM_TOKENS = new Set(["점심", "오후", "저녁", "밤"]);
 // parse.rb의 정규식을 최대한 그대로 유지한다.
 const MATCHER =
   /^((이달|이번달|담달|다음달|(내년|[0-9]{4}년){0,1} *[0-9]+월){0,1} *[0-9]+일+(?! *(?:안에|이내|내))|[0-9]+일 *(?:안에|이내|내)|오늘|내일|모레|(?:이번주|담주|다음주|다담주|다다음주) *내|(이번주|담주|다음주|다담주|다다음주){0,1} *([월화수목금토일](요일|욜)))( *(새벽|아침|점심|오전|오후|저녁|밤){0,1} *([0-9]+시|[0-9]+:[0-9]+) *([0-9]+분|반){0,1}){0,1}( *부터 *(?:새벽|아침|점심|오전|오후|저녁|밤){0,1} *(?:[0-9]+시|[0-9]+:[0-9]+) *(?:[0-9]+분|반){0,1} *까지){0,1}(?: *(?:까지|까지는|전까지|전에|전|이전까지|이전)){0,1}(?: *부터){0,1}에{0,1}( *(.+?)에서){0,1} */u;
+const DEADLINE_SUFFIX_PATTERN = /(까지|까지는|전까지|전에|전|이전까지|이전)\s*$/u;
+const RELATIVE_HOURS_WITHIN_PATTERN = /^([0-9]+)시간 *(안에|이내|내)\s*/u;
+const DAY_WITHIN_PATTERN = /^(오늘|내일|모레)\s*중\s*/u;
+const MONTH_WITHIN_PATTERN = /^(이달|이번달|담달|다음달)\s*내\s*/u;
 
 export function parseKoreanSchedule(input: string, options: ParseOptions = {}): ParseResult {
   if (!input.trim()) {
@@ -49,6 +54,20 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
   }
 
   const scheduleString = input.normalize("NFC").trim();
+  const now = options.now ? new Date(options.now) : new Date();
+  const today = startOfDay(now);
+  const durationMinutes = options.defaultDurationMinutes ?? 60;
+
+  const specialDeadlineResult = tryParseSpecialDeadlineSchedule({
+    scheduleString,
+    now,
+    today,
+    durationMinutes,
+  });
+  if (specialDeadlineResult) {
+    return specialDeadlineResult;
+  }
+
   const match = scheduleString.match(MATCHER);
 
   if (!match) {
@@ -57,10 +76,6 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
       error: "날짜/시간 패턴을 인식하지 못했습니다. 예) 다음주 화요일 오후 3시에 회의",
     };
   }
-
-  const now = options.now ? new Date(options.now) : new Date();
-  const today = startOfDay(now);
-  const durationMinutes = options.defaultDurationMinutes ?? 60;
 
   let absoluteDate: string | undefined = match[1];
   const weekModifierToken = match[4];
@@ -327,6 +342,12 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
 
   const title = scheduleString.replace(MATCHER, "").trim() || "새 일정";
   const hasTime = hour !== undefined && minute !== undefined;
+  const parsedHead = match[0].trim();
+  const hasRangeExpression = Boolean(rangeTimeToken);
+  const hasDeadlineSuffix = DEADLINE_SUFFIX_PATTERN.test(parsedHead);
+  const deadlineByDateKind = dateExpressionKind === "relative-days-within" || dateExpressionKind === "week-within";
+  const intent: ParsedSchedule["intent"] =
+    !hasRangeExpression && (hasDeadlineSuffix || deadlineByDateKind) ? "deadline" : "event";
 
   let start: Date;
   let end: Date;
@@ -368,8 +389,98 @@ export function parseKoreanSchedule(input: string, options: ParseOptions = {}): 
       allDay: !hasTime,
       location: place,
       source: scheduleString,
+      intent,
     },
   };
+}
+
+function tryParseSpecialDeadlineSchedule({
+  scheduleString,
+  now,
+  today,
+  durationMinutes,
+}: {
+  scheduleString: string;
+  now: Date;
+  today: Date;
+  durationMinutes: number;
+}): ParseResult | null {
+  const relativeHoursMatch = scheduleString.match(RELATIVE_HOURS_WITHIN_PATTERN);
+  if (relativeHoursMatch) {
+    const relativeHours = Number.parseInt(relativeHoursMatch[1], 10);
+    if (Number.isNaN(relativeHours) || relativeHours < 1) {
+      return {
+        ok: false,
+        error: "상대 시간은 1시간 이상으로 입력해 주세요. 예) 3시간 이내",
+      };
+    }
+
+    const due = addHours(now, relativeHours);
+    const parsedTail = extractTitleAndLocation(scheduleString.slice(relativeHoursMatch[0].length));
+    return {
+      ok: true,
+      value: {
+        title: parsedTail.title,
+        start: due,
+        end: new Date(due.getTime() + durationMinutes * 60 * 1000),
+        allDay: false,
+        location: parsedTail.location,
+        source: scheduleString,
+        intent: "deadline",
+      },
+    };
+  }
+
+  const dayWithinMatch = scheduleString.match(DAY_WITHIN_PATTERN);
+  if (dayWithinMatch) {
+    const modifier = getDayModifier(dayWithinMatch[1]);
+    if (modifier === undefined) {
+      return null;
+    }
+
+    const dueDay = addDays(today, modifier);
+    const start = new Date(dueDay.getFullYear(), dueDay.getMonth(), dueDay.getDate(), 0, 0, 0, 0);
+    const parsedTail = extractTitleAndLocation(scheduleString.slice(dayWithinMatch[0].length));
+    return {
+      ok: true,
+      value: {
+        title: parsedTail.title,
+        start,
+        end: addDays(start, 1),
+        allDay: true,
+        location: parsedTail.location,
+        source: scheduleString,
+        intent: "deadline",
+      },
+    };
+  }
+
+  const monthWithinMatch = scheduleString.match(MONTH_WITHIN_PATTERN);
+  if (monthWithinMatch) {
+    const monthModifier = getMonthModifierDays(monthWithinMatch[1]);
+    if (monthModifier === undefined) {
+      return null;
+    }
+
+    const shiftedDate = new Date(today.getFullYear(), today.getMonth() + monthModifier, 1);
+    const lastDay = new Date(shiftedDate.getFullYear(), shiftedDate.getMonth() + 1, 0).getDate();
+    const start = new Date(shiftedDate.getFullYear(), shiftedDate.getMonth(), lastDay, 0, 0, 0, 0);
+    const parsedTail = extractTitleAndLocation(scheduleString.slice(monthWithinMatch[0].length));
+    return {
+      ok: true,
+      value: {
+        title: parsedTail.title,
+        start,
+        end: addDays(start, 1),
+        allDay: true,
+        location: parsedTail.location,
+        source: scheduleString,
+        intent: "deadline",
+      },
+    };
+  }
+
+  return null;
 }
 
 function parseTimeTokens(
@@ -491,6 +602,41 @@ function getWeekModifierDays(token: string | undefined): number | undefined {
   return undefined;
 }
 
+function getDayModifier(token: string | undefined): number | undefined {
+  if (!token) {
+    return undefined;
+  }
+  const modifierIndex = DAY_MODIFIER_TOKENS.findIndex((modifierToken) => modifierToken === token);
+  return modifierIndex >= 0 ? modifierIndex : undefined;
+}
+
+function getMonthModifierDays(token: string | undefined): number | undefined {
+  if (token === "이달" || token === "이번달") {
+    return 0;
+  }
+  if (token === "담달" || token === "다음달") {
+    return 1;
+  }
+  return undefined;
+}
+
+function extractTitleAndLocation(text: string): { title: string; location?: string } {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return { title: "새 일정" };
+  }
+
+  const locationMatch = trimmed.match(/^(.+?)에서\s+(.+)$/u);
+  if (locationMatch) {
+    return {
+      title: locationMatch[2].trim() || "새 일정",
+      location: locationMatch[1].trim(),
+    };
+  }
+
+  return { title: trimmed };
+}
+
 function startOfDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
 }
@@ -498,6 +644,12 @@ function startOfDay(date: Date): Date {
 function addDays(date: Date, days: number): Date {
   const next = new Date(date);
   next.setDate(next.getDate() + days);
+  return next;
+}
+
+function addHours(date: Date, hours: number): Date {
+  const next = new Date(date);
+  next.setHours(next.getHours() + hours);
   return next;
 }
 

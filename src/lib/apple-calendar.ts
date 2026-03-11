@@ -1,6 +1,8 @@
 import { environment } from "@raycast/api";
 import { execFile } from "node:child_process";
-import { access } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, chmod, mkdir, readFile, rename, unlink } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -68,6 +70,8 @@ const ADD_EVENT_SCRIPT_PATH = path.join(environment.assetsPath, "add_event.swift
 const LIST_CALENDARS_SCRIPT_PATH = path.join(environment.assetsPath, "list_calendars.swift");
 const ADD_REMINDER_SCRIPT_PATH = path.join(environment.assetsPath, "add_reminder.swift");
 const LIST_REMINDER_LISTS_SCRIPT_PATH = path.join(environment.assetsPath, "list_reminder_lists.swift");
+const SWIFT_BINARY_CACHE_ROOT = path.join(os.tmpdir(), "raycast-korean-calendar-swift");
+const SWIFT_BINARY_DISABLE_CACHE_ENV_KEY = "RAYCAST_KOREAN_CALENDAR_DISABLE_SWIFT_BINARY_CACHE";
 const OPEN_PAYLOAD_ENV_KEY = "RAYCAST_KOREAN_CALENDAR_OPEN_PAYLOAD";
 const OPEN_CALENDAR_SCRIPT = `
 ObjC.import("stdlib");
@@ -190,11 +194,74 @@ export async function openCalendarAtDate(date: Date): Promise<void> {
 async function runSwiftScript(scriptPath: string, args: string[] = []): Promise<string> {
   await access(scriptPath);
 
-  const { stdout } = await execFileAsync("swift", [scriptPath, ...args], {
+  const command = await resolveSwiftCommand(scriptPath);
+  const runtimeArgs = command.mode === "compiled" ? args : [scriptPath, ...args];
+  const executable = command.mode === "compiled" ? command.binaryPath : "swift";
+
+  const { stdout } = await execFileAsync(executable, runtimeArgs, {
     maxBuffer: 1024 * 1024,
   });
 
   return stdout.trim();
+}
+
+async function resolveSwiftCommand(
+  scriptPath: string,
+): Promise<{ mode: "compiled"; binaryPath: string } | { mode: "interpreted" }> {
+  if (process.env[SWIFT_BINARY_DISABLE_CACHE_ENV_KEY] === "1") {
+    return { mode: "interpreted" };
+  }
+
+  try {
+    const binaryPath = await ensureCompiledSwiftBinary(scriptPath);
+    return { mode: "compiled", binaryPath };
+  } catch {
+    return { mode: "interpreted" };
+  }
+}
+
+async function ensureCompiledSwiftBinary(scriptPath: string): Promise<string> {
+  await mkdir(SWIFT_BINARY_CACHE_ROOT, { recursive: true });
+
+  const scriptBytes = await readFile(scriptPath);
+  const scriptHash = createHash("sha256").update(scriptBytes).digest("hex").slice(0, 16);
+  const scriptBaseName = path.basename(scriptPath, ".swift");
+  const binaryPath = path.join(SWIFT_BINARY_CACHE_ROOT, `${scriptBaseName}-${scriptHash}`);
+
+  if (await isExecutable(binaryPath)) {
+    return binaryPath;
+  }
+
+  const tempBinaryPath = `${binaryPath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    await execFileAsync("swiftc", ["-O", scriptPath, "-o", tempBinaryPath], {
+      maxBuffer: 1024 * 1024 * 16,
+    });
+    await chmod(tempBinaryPath, 0o755);
+    await rename(tempBinaryPath, binaryPath);
+  } catch (error) {
+    await safeUnlink(tempBinaryPath);
+    throw error;
+  }
+
+  return binaryPath;
+}
+
+async function isExecutable(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function safeUnlink(filePath: string): Promise<void> {
+  try {
+    await unlink(filePath);
+  } catch {
+    // noop
+  }
 }
 
 function parseListCalendarsOutput(stdout: string): ListCalendarsOutput {

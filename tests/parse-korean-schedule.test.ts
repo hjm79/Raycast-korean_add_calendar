@@ -328,6 +328,7 @@ describe("parseKoreanSchedule", () => {
 
     expect(result.value.title).toBe("계약서 보내기");
     expect(result.value.allDay).toBe(true);
+    expect(result.value.intent).toBe("deadline");
     expectDate(result.value.start, { year: 2026, month: 2, day: 20, hour: 0, minute: 0 });
   });
 
@@ -339,6 +340,7 @@ describe("parseKoreanSchedule", () => {
 
     expect(result.value.title).toBe("정산");
     expect(result.value.allDay).toBe(true);
+    expect(result.value.intent).toBe("deadline");
     expectDate(result.value.start, { year: 2026, month: 2, day: 22, hour: 0, minute: 0 });
   });
 
@@ -349,8 +351,101 @@ describe("parseKoreanSchedule", () => {
     if (!result.ok) return;
 
     expect(result.value.title).toBe("회의");
+    expect(result.value.intent).toBe("event");
     expectDate(result.value.start, { year: 2026, month: 2, day: 18, hour: 16, minute: 0 });
     expectDate(result.value.end, { year: 2026, month: 2, day: 18, hour: 17, minute: 0 });
+  });
+
+  it("marks explicit deadline suffix as deadline intent", () => {
+    const result = parseKoreanSchedule("내일 오후 6시까지 제출", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.intent).toBe("deadline");
+    expect(result.value.title).toBe("제출");
+  });
+
+  it("keeps from-to range as event intent even with '까지'", () => {
+    const result = parseKoreanSchedule("내일 오후 4시부터 6시까지 회의", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.intent).toBe("event");
+  });
+
+  it("parses '오늘 중' as all-day deadline", () => {
+    const result = parseKoreanSchedule("오늘 중 결재", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.intent).toBe("deadline");
+    expect(result.value.allDay).toBe(true);
+    expect(result.value.title).toBe("결재");
+    expectDate(result.value.start, { year: 2026, month: 2, day: 17, hour: 0, minute: 0 });
+  });
+
+  it("parses '내일중' without whitespace", () => {
+    const result = parseKoreanSchedule("내일중 보고서 제출", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.intent).toBe("deadline");
+    expect(result.value.title).toBe("보고서 제출");
+    expectDate(result.value.start, { year: 2026, month: 2, day: 18, hour: 0, minute: 0 });
+  });
+
+  it("parses '3시간 이내' as time deadline", () => {
+    const result = parseKoreanSchedule("3시간 이내 계약서 회신", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.intent).toBe("deadline");
+    expect(result.value.allDay).toBe(false);
+    expect(result.value.title).toBe("계약서 회신");
+    expectDate(result.value.start, { year: 2026, month: 2, day: 17, hour: 12, minute: 0 });
+  });
+
+  it("fails on invalid relative hour of 0", () => {
+    const result = parseKoreanSchedule("0시간 이내 테스트", { now: baseNow });
+    expect(result.ok).toBe(false);
+  });
+
+  it("parses '이번달 내' as end-of-month deadline", () => {
+    const result = parseKoreanSchedule("이번달 내 정산", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.intent).toBe("deadline");
+    expect(result.value.allDay).toBe(true);
+    expect(result.value.title).toBe("정산");
+    expectDate(result.value.start, { year: 2026, month: 2, day: 28, hour: 0, minute: 0 });
+  });
+
+  it("parses '다음달 내' as next month end deadline", () => {
+    const result = parseKoreanSchedule("다음달 내 월간 결산", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.intent).toBe("deadline");
+    expectDate(result.value.start, { year: 2026, month: 3, day: 31, hour: 0, minute: 0 });
+  });
+
+  it("parses deadline suffix '이전까지'", () => {
+    const result = parseKoreanSchedule("내일 오전 9시 이전까지 보고", { now: baseNow });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.intent).toBe("deadline");
+    expect(result.value.title).toBe("보고");
+    expectDate(result.value.start, { year: 2026, month: 2, day: 18, hour: 9, minute: 0 });
   });
 });
 
