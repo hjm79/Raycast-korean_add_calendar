@@ -302,6 +302,20 @@ export default function Command() {
         onChange={setSentence}
       />
 
+      <Form.Description
+        title="파싱 상태"
+        text={
+          !parseResult
+            ? "문장을 입력하면 미리보기를 표시합니다."
+            : parseResult.ok
+              ? "등록 가능"
+              : `오류: ${parseResult.error}`
+        }
+      />
+      {parsedPreview && (
+        <Form.Description title="파싱 요약" text={formatPreviewSummary(parsedPreview, previewLocation)} />
+      )}
+
       <Form.TextField
         id="location"
         title="장소 (선택)"
@@ -364,31 +378,21 @@ export default function Command() {
         </Form.Dropdown>
       )}
 
-      <Form.Separator />
       {calendarLoadError && <Form.Description title="캘린더 오류" text={calendarLoadError} />}
       {reminderLoadError && <Form.Description title="미리알림 오류" text={reminderLoadError} />}
-      <Form.Description
-        title="파싱 상태"
-        text={
-          !parseResult
-            ? "문장을 입력하면 미리보기를 표시합니다."
-            : parseResult.ok
-              ? "등록 가능"
-              : `오류: ${parseResult.error}`
-        }
-      />
-
-      {parsedPreview && (
-        <>
-          <Form.Description title="제목" text={parsedPreview.title} />
-          <Form.Description title="시작" text={formatDate(parsedPreview.start, parsedPreview.allDay)} />
-          <Form.Description title="종료" text={formatDate(parsedPreview.end, parsedPreview.allDay)} />
-          <Form.Description title="장소" text={previewLocation || "(없음)"} />
-          <Form.Description title="유형" text={parsedPreview.allDay ? "종일" : "시간 지정"} />
-        </>
-      )}
     </Form>
   );
+}
+
+function formatPreviewSummary(
+  parsedPreview: { title: string; start: Date; end: Date; allDay: boolean },
+  location: string | undefined,
+): string {
+  const timeText = parsedPreview.allDay
+    ? `${formatDate(parsedPreview.start, true)} (종일)`
+    : `${formatDate(parsedPreview.start, false)} ~ ${formatDate(parsedPreview.end, false)}`;
+  const locationText = location || "(없음)";
+  return `제목: ${parsedPreview.title} | 시간: ${timeText} | 장소: ${locationText}`;
 }
 
 function formatDate(value: Date, allDay: boolean): string {
