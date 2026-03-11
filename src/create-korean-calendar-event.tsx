@@ -30,6 +30,7 @@ export default function Command() {
   const [sentence, setSentence] = useState("");
   const [location, setLocation] = useState("");
   const [targetType, setTargetType] = useState<SubmitTarget>("calendar");
+  const [isTargetManuallyOverridden, setIsTargetManuallyOverridden] = useState(false);
   const [calendarId, setCalendarId] = useState("");
   const [reminderListId, setReminderListId] = useState("");
   const [calendars, setCalendars] = useState<WritableCalendar[]>([]);
@@ -88,6 +89,7 @@ export default function Command() {
     (value: string) => {
       const typedValue = (value as SubmitTarget) || "calendar";
       setTargetType(typedValue);
+      setIsTargetManuallyOverridden(true);
       persistTargetType(typedValue);
     },
     [persistTargetType],
@@ -163,6 +165,18 @@ export default function Command() {
     void loadReminderLists();
     void loadTargetTypePreference();
   }, [loadCalendars, loadReminderLists, loadTargetTypePreference]);
+
+  useEffect(() => {
+    if (!parseResult?.ok || isTargetManuallyOverridden) {
+      return;
+    }
+
+    const autoTargetType: SubmitTarget = parseResult.value.intent === "deadline" ? "reminder" : "calendar";
+    if (targetType !== autoTargetType) {
+      setTargetType(autoTargetType);
+      persistTargetType(autoTargetType);
+    }
+  }, [parseResult, isTargetManuallyOverridden, targetType, persistTargetType]);
 
   async function handleSubmit(values: FormValues, options: { openCalendarAfterCreate: boolean }) {
     if (values.targetType === "calendar" && !values.calendarId) {
@@ -242,6 +256,7 @@ export default function Command() {
 
       setSentence("");
       setLocation("");
+      setIsTargetManuallyOverridden(false);
     } catch (error) {
       await showToast({
         style: Toast.Style.Failure,
@@ -256,6 +271,16 @@ export default function Command() {
   const parsedPreview = parseResult?.ok ? parseResult.value : undefined;
   const manualLocation = location.trim();
   const previewLocation = manualLocation || parsedPreview?.location;
+  const recommendedTargetType: SubmitTarget | undefined = parsedPreview
+    ? parsedPreview.intent === "deadline"
+      ? "reminder"
+      : "calendar"
+    : undefined;
+
+  const handleSentenceChange = useCallback((value: string) => {
+    setSentence(value);
+    setIsTargetManuallyOverridden(false);
+  }, []);
 
   return (
     <Form
@@ -299,7 +324,7 @@ export default function Command() {
         placeholder="예) 다음주 화요일 오후 3시 반에 강남에서 팀 미팅"
         info="한국어 자연어 파싱"
         value={sentence}
-        onChange={setSentence}
+        onChange={handleSentenceChange}
       />
 
       <Form.Description
@@ -314,6 +339,16 @@ export default function Command() {
       />
       {parsedPreview && (
         <Form.Description title="파싱 요약" text={formatPreviewSummary(parsedPreview, previewLocation)} />
+      )}
+      {recommendedTargetType && (
+        <Form.Description
+          title="추천 대상"
+          text={
+            isTargetManuallyOverridden
+              ? `${recommendedTargetType === "reminder" ? "미리알림 항목" : "Apple Calendar 일정"} (수동 선택 유지)`
+              : `${recommendedTargetType === "reminder" ? "미리알림 항목" : "Apple Calendar 일정"} (자동 적용)`
+          }
+        />
       )}
 
       <Form.TextField
@@ -385,14 +420,19 @@ export default function Command() {
 }
 
 function formatPreviewSummary(
-  parsedPreview: { title: string; start: Date; end: Date; allDay: boolean },
+  parsedPreview: { title: string; start: Date; end: Date; allDay: boolean; intent: "event" | "deadline" },
   location: string | undefined,
 ): string {
-  const timeText = parsedPreview.allDay
-    ? `${formatDate(parsedPreview.start, true)} (종일)`
-    : `${formatDate(parsedPreview.start, false)} ~ ${formatDate(parsedPreview.end, false)}`;
+  const typeText = parsedPreview.intent === "deadline" ? "마감" : "일정";
+  const timeLabel = parsedPreview.intent === "deadline" ? "마감" : "시간";
+  const timeText =
+    parsedPreview.intent === "deadline"
+      ? formatDate(parsedPreview.start, parsedPreview.allDay)
+      : parsedPreview.allDay
+        ? `${formatDate(parsedPreview.start, true)} (종일)`
+        : `${formatDate(parsedPreview.start, false)} ~ ${formatDate(parsedPreview.end, false)}`;
   const locationText = location || "(없음)";
-  return `제목: ${parsedPreview.title} | 시간: ${timeText} | 장소: ${locationText}`;
+  return `유형: ${typeText} | 제목: ${parsedPreview.title} | ${timeLabel}: ${timeText} | 장소: ${locationText}`;
 }
 
 function formatDate(value: Date, allDay: boolean): string {
