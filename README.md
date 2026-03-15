@@ -8,7 +8,7 @@
 
 ## 빠른 시작
 
-1. Raycast에서 `Create Korean Calendar Event` 실행
+1. Raycast에서 `Create Korean Schedule Item` 실행
 2. `일정 문장` 입력
 3. 등록 대상(`Apple Calendar 일정`/`미리알림 항목`)과 폴더 선택
 4. Action 실행 (`Apple Calendar에 등록` 또는 `미리알림에 등록`)

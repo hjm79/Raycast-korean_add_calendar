@@ -15,9 +15,9 @@
   "commands": [
     {
       "name": "create-korean-calendar-event",
-      "title": "Create Korean Calendar Event",
+      "title": "Create Korean Schedule Item",
       "subtitle": "Korean -> Calendar/Reminder",
-      "description": "Parse Korean schedule text and create an Apple Calendar event or reminder",
+      "description": "Parse Korean schedule text and create an Apple Calendar event or Apple Reminder",
       "mode": "view"
     }
   ],

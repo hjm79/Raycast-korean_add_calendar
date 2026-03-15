@@ -4,7 +4,7 @@
 
 ## 1) 설치 후 최초 확인
 
-1. Raycast에서 extension을 설치한 뒤 `Create Korean Calendar Event` 명령을 실행합니다.
+1. Raycast에서 extension을 설치한 뒤 `Create Korean Schedule Item` 명령을 실행합니다.
 2. 최초 1회 macOS 권한 팝업이 뜨면 아래를 허용합니다.
    - Calendar 접근 권한
    - Reminders 접근 권한
