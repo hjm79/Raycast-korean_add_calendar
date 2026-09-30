@@ -1,38 +1,65 @@
 # Extension Changelog
 
-## [2026-03-11]
+## [Batch Parsing and Recurring Events] - {PR_MERGE_DATE}
 
 ### Added
 
-- Apple Calendar 일정 + 미리알림 항목 동시 지원
-- EventKit 기반 캘린더/미리알림 폴더 목록 조회 및 선택
-- 등록 후 Calendar 앱 열기 액션
-- 한국어 시간 범위 파싱 지원 (`부터 ~까지`)
-- 마감 표현 확장 지원
+- Create up to three Calendar events or Reminder items from one Korean sentence
+- Daily, weekly, and monthly recurring Apple Calendar events
+- Recurrence limits by occurrence count or inclusive end date
+- Explicit location markers using `장소:`, `장소=`, and `장소는`
+- Optional command argument and fallback text to prefill the review form
+- Build-time native Swift bridge for EventKit access without a user-installed Swift toolchain
+- Regression tests for parser, batch, recurrence, permission, and bridge behavior
+
+### Improved
+
+- Request Calendar or Reminders permission only when the corresponding target is selected
+- Preserve full dates when later batch clauses inherit the first clause date
+- Keep only failed or unconfirmed clauses in the input after partial EventKit results
+- Validate recurrence settings for the full batch before creating any item
+- Require confirmation before retrying a creation whose native helper timed out
+- Update to Raycast API 2.5.3
+- Use US English for all user-facing interface and error copy
+
+### Fixed
+
+- Prevent partially parsed batches from creating incomplete results
+- Prevent commas in titles or locations from creating unintended items
+- Prevent mixed Calendar and Reminder batches from using the wrong target
+- Preserve explicit short durations in recurring events
+- Include the selected recurrence end date at the event's scheduled time
+- Stop creation when a previously selected Calendar or Reminder list no longer exists
+- Infer the nearest AM/PM value for an unmarked time-range end
+- Preserve recurrence wall-clock times across daylight-saving transitions
+- Preserve token-like phrases inside titles and locations
+- Split later batch clauses that start with spaced, standalone-day, next-year, or explicit-year date cues
+- Avoid a submission crash when recurrence-only form values are omitted for non-recurring items
+
+## [Initial Version] - 2026-03-16
+
+### Added
+
+- Apple Reminders support with selectable reminder list destination.
+- Regression fixture tests for parsing edge cases.
+- Detailed usage and parsing guide under `docs/usage-and-parsing-guide.md`.
+
+### Changed
+
+- Migrated bridge logic to Swift + EventKit (Calendar and Reminders).
+- Added automatic target recommendation (`deadline -> reminder`, `event -> calendar`) with manual override protection.
+- Expanded Korean deadline parsing coverage:
   - `까지/까지는/전/전에/전까지/이전/이전까지`
   - `N일 안에/이내/내`
   - `N시간 안에/이내/내`
   - `오늘/내일/모레 중`
-  - `이번주/다음주 내`, `이번달/다음달 내`
-- 파서 회귀 방지용 regression 테스트 세트 추가
-
-### Changed
-
-- JXA 브리지 대신 Swift + EventKit 브리지로 마이그레이션
-- 캘린더/미리알림 선택 키를 이름이 아닌 identifier(UUID) 기반으로 처리
-- 마지막 선택 대상(등록 타입/캘린더/미리알림 폴더) 자동 복원
-- 마감 intent 문장은 기본 등록 대상을 `미리알림 항목`으로 자동 전환
-  - 사용자가 수동 변경하면 해당 문장에서는 수동 선택 유지
-- 파싱 결과 노출 UI를 상단 요약 중심으로 정리
-  - `파싱 상태`, `파싱 요약`, `추천 대상` 즉시 확인 가능
-- Raycast 커맨드 타이틀을 실제 기능과 맞게 `Create Korean Schedule Item`으로 조정
-- Swift 브리지 실행 시 `swiftc` 바이너리 캐시 우선 사용, 실패 시 인터프리터 실행으로 폴백
+  - `이번주/다음주/다다음주 내`
+  - `이번달/다음달 내`
+- Updated command metadata and user-facing text to US English.
 
 ### Fixed
 
-- 월말(`31일`) 기준 다음달 계산 오버플로우 보정
-- 일요일 기준 이번주 요일 계산 오류 보정
-- `absoluteDate` 미존재 시 크래시 방지
-- 오전/오후 12시 변환 로직 보정 (`오전 12시`, `오후 12시`, `밤 12시`)
-- 24시간 표기와 오전/오후 혼용 입력 검증 강화
-- 장소 정규식 탐욕 매칭 개선(`...에서` 과다 포획 방지)
+- Month-end overflow when resolving next-month day expressions.
+- Sunday week-offset edge case for `이번주 ...`.
+- AM/PM 12 o'clock normalization and mixed 24-hour validation.
+- Greedy location capture when multiple `에서` tokens are present.

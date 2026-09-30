@@ -1,59 +1,72 @@
-# Korean Add Calendar (Raycast)
+# Korean Add Calendar
 
-한국어 자연어 문장을 파싱해서 Apple Calendar 일정 또는 미리알림에 항목을 등록하는 Raycast 익스텐션입니다.
+Create Apple Calendar events or Apple Reminders from deterministic Korean natural-language input.
 
-![raycast2x](https://github.com/user-attachments/assets/72f3dc0d-e1ec-42d8-809e-b297242b4639)
+## Quick Start
 
+1. Run `Create Korean Schedule Item` in Raycast.
+2. Enter a Korean schedule sentence in the form or as the optional command argument.
+3. Review the parsing summary and selected creation target.
+4. Choose a Calendar or Reminder list.
+5. Run the create action.
 
+See the [usage and parsing guide](docs/usage-and-parsing-guide.md) for the complete syntax and behavior.
 
-## 빠른 시작
+## Input Examples
 
-1. Raycast에서 `Create Korean Schedule Item` 실행
-2. `일정 문장` 입력
-3. 등록 대상(`Apple Calendar 일정`/`미리알림 항목`)과 폴더 선택
-4. Action 실행 (`Apple Calendar에 등록` 또는 `미리알림에 등록`)
+```text
+내일 오후 3시에 회의
+다음주 화요일 오전 10시 반에 강남에서 팀 미팅
+내일 오후 4시부터 6시까지 회의
+3일 안에 계약서 보내기
+매주 화요일 오후 4시 코드리뷰
+내일 오후 3시 회의, 모레 오후 5시 통화
+내일 오후 3시 회의 장소: B1 대회의실
+```
 
-상세 사용법/파싱 규칙/안내 문구 템플릿은 아래 문서를 참고하세요.
+## Supported Behavior
 
-- [사용/파싱 가이드](docs/usage-and-parsing-guide.md)
+- Relative, weekday, month/day, explicit-year, and next-year date expressions
+- Korean AM/PM terms and 24-hour time input
+- Explicit time ranges using `부터 ... 까지`
+- Deadline expressions such as `까지`, `전에`, `N일 안에`, and `N시간 이내`
+- Daily, weekly, and monthly recurring Calendar events
+- Up to three items in one compound sentence
+- Explicit locations using `장소:`, `장소=`, or `장소는`
+- Leading and trailing `...에서` location forms
+- Automatic Calendar or Reminder recommendation based on parsed intent
+- Persistent target, Calendar, Reminder list, and recurrence preferences
+- Optional command argument and, when configured, Raycast fallback text that prefill the review form
 
-## 지원 예시
+## Safety Rules
 
-- `내일 오후 3시에 회의`
-- `다음주 화요일 오전 10시 반에 강남에서 팀 미팅`
-- `3월 12일 점심 12시 30분에 점심 약속`
-- `오늘 19:00에 운동`
-- `내일 오후 4시부터 6시까지 회의`
-- `내일 6시 전에 제출`
-- `3일 안에 계약서 보내기`
-- `이번주 내 정산`
-- `3시간 이내 계약서 회신`
-- `오늘 중 결재`
-- `이번달 내 정산`
+- Every clause in a batch must parse successfully before any item is created.
+- Recurrence settings for every clause are validated before any item is created.
+- Calendar events and Reminder items cannot be mixed in one submission.
+- A comma is treated as a batch separator only when the following clause begins with a date or time cue.
+- If a selected Calendar or Reminder list no longer exists, creation stops instead of falling back to another list.
+- If the native helper times out, its outcome is marked unconfirmed and the same retry requires an explicit check first.
+- Recurring schedules currently support Apple Calendar only.
+- A manual location overrides parsed locations for every item in the current submission.
 
-## 동작 규칙
+## Permissions
 
-- 시간이 없으면 종일 일정으로 생성합니다.
-- 파싱된 시작 시각이 이미 과거인 경우, 요일만 입력한 표현(예: `월요일 3시`)은 다음 주로 보정합니다.
-- 일정 저장은 `assets/add_event.swift`에서 EventKit을 직접 호출합니다.
-- 미리알림 저장은 `assets/add_reminder.swift`에서 EventKit을 직접 호출합니다.
-- 등록 대상을 `캘린더` 또는 `미리알림`으로 선택할 수 있습니다.
-- 캘린더/미리알림 폴더는 EventKit으로 불러온 목록에서 선택합니다.
-- 마지막으로 선택한 캘린더/미리알림 폴더를 저장해 다음 실행 때 자동 복원합니다.
-- 장소는 별도 입력칸으로 직접 지정할 수 있고, 입력 시 문장 파싱 장소보다 우선합니다.
-- 파싱 상태/요약/추천 대상을 입력창 바로 아래에서 바로 확인할 수 있어 스크롤 없이 검토할 수 있습니다.
-- `부터 ~까지` 시간 범위를 입력하면 종료 시각으로 반영합니다.
-- `까지/전에/전까지/이전`, `N일 안에/이내/내`, `이번주 내` 마감 표현을 지원합니다.
-- `N시간 안에/이내/내`, `오늘/내일/모레 중`, `이번달/다음달 내` 표현을 지원합니다.
-- 마감 표현은 `지금~마감시각` 범위가 아니라 `마감 시점`으로 처리합니다(마감성 작업은 미리알림 권장).
-- 시간이 없는 마감 표현(`3일 안에`, `이번주 내`, `이번달 내`)은 종일 마감으로 저장되어 미리보기에서 `시작일~다음날` 형식으로 보일 수 있습니다.
-- 마감 문장은 기본 등록 대상을 `미리알림 항목`으로 자동 전환합니다(수동 변경 시 유지).
-- 액션에서 `등록 후 캘린더 열기`를 선택하면 생성 직후 Calendar 앱을 해당 일정 시각으로 엽니다.
-- 최초 1회 macOS 캘린더/미리알림 권한 허용이 필요합니다.
+The extension requests Calendar or Reminders access only when the corresponding target is selected. If access is denied, enable Raycast under:
 
+```text
+System Settings > Privacy & Security > Calendars
+System Settings > Privacy & Security > Reminders
+```
 
-Raycast 개발 모드:
+EventKit access uses a native executable bundled at build time. Extension users do not need Xcode or a Swift toolchain.
+
+## Development
 
 ```bash
-npx ray develop
+npm ci
+npm test
+npm run lint
+npm run build
 ```
+
+Building the native bridge requires Xcode 16.3 or later. Runtime users do not need Xcode.

@@ -1,19 +1,29 @@
-import { environment } from "@raycast/api";
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { access, chmod, mkdir, readFile, rename, unlink } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { promisify } from "node:util";
+
+import {
+  createCalendarEvent as createCalendarEventNative,
+  createReminder as createReminderNative,
+  listWritableCalendarsJSON,
+  listWritableReminderListsJSON,
+} from "swift:../../swift";
 
 import { ParsedSchedule } from "./parse-korean-schedule";
 
 export interface CreateCalendarEventOptions {
   preferredCalendarIdentifier?: string;
+  recurrence?: CalendarRecurrence;
 }
 
 export interface CreateReminderOptions {
   preferredReminderCalendarIdentifier?: string;
+}
+
+export class CreationOutcomeUnknownError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CreationOutcomeUnknownError";
+  }
 }
 
 export interface WritableCalendar {
@@ -55,6 +65,7 @@ interface EventKitPayload {
   location?: string;
   allDay: boolean;
   preferredCalendarIdentifier?: string;
+  recurrence?: CalendarRecurrencePayload;
 }
 
 interface ReminderPayload {
@@ -65,14 +76,57 @@ interface ReminderPayload {
   preferredReminderCalendarIdentifier?: string;
 }
 
+export interface CalendarRecurrence {
+  frequency: "daily" | "weekly" | "monthly";
+  interval?: number;
+  weekday?: number;
+  dayOfMonth?: number;
+  end: CalendarRecurrenceEnd;
+}
+
+export type CalendarRecurrenceEnd =
+  | {
+      type: "count";
+      count: number;
+    }
+  | {
+      type: "until";
+      untilEpochMs: number;
+    };
+
+interface CalendarRecurrencePayload {
+  frequency: "daily" | "weekly" | "monthly";
+  interval: number;
+  weekday?: number;
+  dayOfMonth?: number;
+  end: CalendarRecurrenceEndPayload;
+}
+
+type CalendarRecurrenceEndPayload =
+  | {
+      type: "count";
+      count: number;
+    }
+  | {
+      type: "until";
+      untilEpochMs: number;
+    };
+
+class NativeBridgeTimeoutError extends Error {}
+
 const execFileAsync = promisify(execFile);
-const ADD_EVENT_SCRIPT_PATH = path.join(environment.assetsPath, "add_event.swift");
-const LIST_CALENDARS_SCRIPT_PATH = path.join(environment.assetsPath, "list_calendars.swift");
-const ADD_REMINDER_SCRIPT_PATH = path.join(environment.assetsPath, "add_reminder.swift");
-const LIST_REMINDER_LISTS_SCRIPT_PATH = path.join(environment.assetsPath, "list_reminder_lists.swift");
-const SWIFT_BINARY_CACHE_ROOT = path.join(os.tmpdir(), "raycast-korean-calendar-swift");
-const SWIFT_BINARY_DISABLE_CACHE_ENV_KEY = "RAYCAST_KOREAN_CALENDAR_DISABLE_SWIFT_BINARY_CACHE";
 const OPEN_PAYLOAD_ENV_KEY = "RAYCAST_KOREAN_CALENDAR_OPEN_PAYLOAD";
+const OPEN_CALENDAR_TIMEOUT_MS = 10_000;
+const NATIVE_BRIDGE_TIMEOUT_MS = 30_000;
+const CALENDAR_PERMISSION_GUIDE =
+  "Open System Settings > Privacy & Security > Calendars and allow Raycast access, then try again.";
+const REMINDER_PERMISSION_GUIDE =
+  "Open System Settings > Privacy & Security > Reminders and allow Raycast access, then try again.";
+const CALENDAR_PERMISSION_PATTERN =
+  /(calendar permission denied|timed out while waiting for calendar permission|not authorized.*calendar|access to calendar.*denied)/iu;
+const REMINDER_PERMISSION_PATTERN =
+  /(reminders? permission denied|timed out while waiting for reminders? permission|not authorized.*reminders?|access to reminders?.*denied)/iu;
+const CHILD_ENV_ALLOWLIST = ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "USER", "LOGNAME"] as const;
 const OPEN_CALENDAR_SCRIPT = `
 ObjC.import("stdlib");
 
@@ -88,7 +142,7 @@ calendarApp.activate();
 try {
   calendarApp.switchView({ to: "day view" });
 } catch (_) {
-  // switchView가 실패해도 날짜 이동은 계속 진행한다.
+  // Continue even if switchView fails.
 }
 
 calendarApp.viewCalendar({ at: new Date(payload.startEpochMs) });
@@ -98,36 +152,44 @@ export async function listWritableCalendars(): Promise<{
   calendars: WritableCalendar[];
   defaultCalendarIdentifier?: string;
 }> {
-  const stdout = await runSwiftScript(LIST_CALENDARS_SCRIPT_PATH);
-  const parsed = parseListCalendarsOutput(stdout);
-  const defaultCalendarIdentifier = parsed.defaultCalendarIdentifier;
-  const calendars = parsed.calendars.map((calendar) => ({
-    ...calendar,
-    isDefault: calendar.id === defaultCalendarIdentifier,
-  }));
+  try {
+    const response = await withNativeBridgeTimeout(
+      listWritableCalendarsJSON(),
+      "Timed out while waiting for calendar permission",
+    );
+    const parsed = parseListCalendarsOutput(response);
+    const defaultCalendarIdentifier = parsed.defaultCalendarIdentifier;
+    const calendars = parsed.calendars.map((calendar) => ({
+      ...calendar,
+      isDefault: calendar.id === defaultCalendarIdentifier,
+    }));
 
-  return {
-    calendars,
-    defaultCalendarIdentifier,
-  };
+    return { calendars, defaultCalendarIdentifier };
+  } catch (error) {
+    throw new Error(`Failed to load calendar list: ${toErrorMessage(error)}`);
+  }
 }
 
 export async function listWritableReminderLists(): Promise<{
   reminderLists: WritableReminderList[];
   defaultReminderListIdentifier?: string;
 }> {
-  const stdout = await runSwiftScript(LIST_REMINDER_LISTS_SCRIPT_PATH);
-  const parsed = parseListReminderListsOutput(stdout);
-  const defaultReminderListIdentifier = parsed.defaultReminderListIdentifier;
-  const reminderLists = parsed.reminderLists.map((reminderList) => ({
-    ...reminderList,
-    isDefault: reminderList.id === defaultReminderListIdentifier,
-  }));
+  try {
+    const response = await withNativeBridgeTimeout(
+      listWritableReminderListsJSON(),
+      "Timed out while waiting for reminders permission",
+    );
+    const parsed = parseListReminderListsOutput(response);
+    const defaultReminderListIdentifier = parsed.defaultReminderListIdentifier;
+    const reminderLists = parsed.reminderLists.map((reminderList) => ({
+      ...reminderList,
+      isDefault: reminderList.id === defaultReminderListIdentifier,
+    }));
 
-  return {
-    reminderLists,
-    defaultReminderListIdentifier,
-  };
+    return { reminderLists, defaultReminderListIdentifier };
+  } catch (error) {
+    throw new Error(`Failed to load reminder list folders: ${toErrorMessage(error)}`);
+  }
 }
 
 export async function createAppleCalendarEvent(
@@ -141,15 +203,22 @@ export async function createAppleCalendarEvent(
     location: event.location,
     allDay: event.allDay,
     preferredCalendarIdentifier: options.preferredCalendarIdentifier,
+    recurrence: options.recurrence ? normalizeRecurrencePayload(options.recurrence) : undefined,
   };
 
-  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
-
   try {
-    const stdout = await runSwiftScript(ADD_EVENT_SCRIPT_PATH, [encodedPayload]);
-    return { calendarName: stdout || "알 수 없음" };
+    const calendarName = await withNativeBridgeTimeout(
+      createCalendarEventNative(encodePayload(payload)),
+      "Calendar creation timed out",
+    );
+    return { calendarName: calendarName || "Unknown" };
   } catch (error) {
-    throw new Error(`Apple Calendar에 일정을 추가하지 못했습니다: ${toErrorMessage(error)}`);
+    if (error instanceof NativeBridgeTimeoutError) {
+      throw new CreationOutcomeUnknownError(
+        "Calendar did not confirm whether the event was saved. Check Calendar before retrying.",
+      );
+    }
+    throw new Error(`Failed to create Apple Calendar event: ${toErrorMessage(error)}`);
   }
 }
 
@@ -161,17 +230,23 @@ export async function createAppleReminder(
     title: reminder.title,
     dueEpochMs: reminder.start.getTime(),
     allDay: reminder.allDay,
-    notes: reminder.location ? `장소: ${reminder.location}` : undefined,
+    notes: reminder.location ? `Location: ${reminder.location}` : undefined,
     preferredReminderCalendarIdentifier: options.preferredReminderCalendarIdentifier,
   };
 
-  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
-
   try {
-    const stdout = await runSwiftScript(ADD_REMINDER_SCRIPT_PATH, [encodedPayload]);
-    return { reminderListName: stdout || "알 수 없음" };
+    const reminderListName = await withNativeBridgeTimeout(
+      createReminderNative(encodePayload(payload)),
+      "Reminder creation timed out",
+    );
+    return { reminderListName: reminderListName || "Unknown" };
   } catch (error) {
-    throw new Error(`미리알림에 항목을 추가하지 못했습니다: ${toErrorMessage(error)}`);
+    if (error instanceof NativeBridgeTimeoutError) {
+      throw new CreationOutcomeUnknownError(
+        "Reminders did not confirm whether the item was saved. Check Reminders before retrying.",
+      );
+    }
+    throw new Error(`Failed to create reminder item: ${toErrorMessage(error)}`);
   }
 }
 
@@ -180,111 +255,78 @@ export async function openCalendarAtDate(date: Date): Promise<void> {
 
   try {
     await execFileAsync("osascript", ["-l", "JavaScript", "-e", OPEN_CALENDAR_SCRIPT], {
-      env: {
-        ...process.env,
-        [OPEN_PAYLOAD_ENV_KEY]: payload,
-      },
+      env: buildChildEnv({ [OPEN_PAYLOAD_ENV_KEY]: payload }),
       maxBuffer: 1024 * 1024,
+      timeout: OPEN_CALENDAR_TIMEOUT_MS,
     });
   } catch (error) {
-    throw new Error(`Calendar 앱을 열지 못했습니다: ${toErrorMessage(error)}`);
+    throw new Error(`Failed to open Calendar app: ${toErrorMessage(error)}`);
   }
 }
 
-async function runSwiftScript(scriptPath: string, args: string[] = []): Promise<string> {
-  await access(scriptPath);
+function encodePayload(payload: EventKitPayload | ReminderPayload): string {
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
+}
 
-  const command = await resolveSwiftCommand(scriptPath);
-  const runtimeArgs = command.mode === "compiled" ? args : [scriptPath, ...args];
-  const executable = command.mode === "compiled" ? command.binaryPath : "swift";
-
-  const { stdout } = await execFileAsync(executable, runtimeArgs, {
-    maxBuffer: 1024 * 1024,
+function withNativeBridgeTimeout<T>(operation: Promise<T>, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new NativeBridgeTimeoutError(message)), NATIVE_BRIDGE_TIMEOUT_MS);
+    operation.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
   });
-
-  return stdout.trim();
 }
 
-async function resolveSwiftCommand(
-  scriptPath: string,
-): Promise<{ mode: "compiled"; binaryPath: string } | { mode: "interpreted" }> {
-  if (process.env[SWIFT_BINARY_DISABLE_CACHE_ENV_KEY] === "1") {
-    return { mode: "interpreted" };
+function buildChildEnv(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of CHILD_ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (typeof value === "string" && value.length > 0) {
+      env[key] = value;
+    }
   }
 
-  try {
-    const binaryPath = await ensureCompiledSwiftBinary(scriptPath);
-    return { mode: "compiled", binaryPath };
-  } catch {
-    return { mode: "interpreted" };
+  if (!env.PATH) {
+    env.PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
   }
+
+  for (const [key, value] of Object.entries(overrides)) {
+    if (typeof value === "string") {
+      env[key] = value;
+    }
+  }
+
+  return env;
 }
 
-async function ensureCompiledSwiftBinary(scriptPath: string): Promise<string> {
-  await mkdir(SWIFT_BINARY_CACHE_ROOT, { recursive: true });
-
-  const scriptBytes = await readFile(scriptPath);
-  const scriptHash = createHash("sha256").update(scriptBytes).digest("hex").slice(0, 16);
-  const scriptBaseName = path.basename(scriptPath, ".swift");
-  const binaryPath = path.join(SWIFT_BINARY_CACHE_ROOT, `${scriptBaseName}-${scriptHash}`);
-
-  if (await isExecutable(binaryPath)) {
-    return binaryPath;
-  }
-
-  const tempBinaryPath = `${binaryPath}.tmp-${process.pid}-${Date.now()}`;
+function parseListCalendarsOutput(response: string): ListCalendarsOutput {
   try {
-    await execFileAsync("swiftc", ["-O", scriptPath, "-o", tempBinaryPath], {
-      maxBuffer: 1024 * 1024 * 16,
-    });
-    await chmod(tempBinaryPath, 0o755);
-    await rename(tempBinaryPath, binaryPath);
-  } catch (error) {
-    await safeUnlink(tempBinaryPath);
-    throw error;
-  }
-
-  return binaryPath;
-}
-
-async function isExecutable(filePath: string): Promise<boolean> {
-  try {
-    await access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function safeUnlink(filePath: string): Promise<void> {
-  try {
-    await unlink(filePath);
-  } catch {
-    // noop
-  }
-}
-
-function parseListCalendarsOutput(stdout: string): ListCalendarsOutput {
-  try {
-    const parsed = JSON.parse(stdout) as ListCalendarsOutput;
+    const parsed = JSON.parse(response) as ListCalendarsOutput;
     if (!Array.isArray(parsed.calendars)) {
       throw new Error("Invalid calendars payload");
     }
     return parsed;
   } catch (error) {
-    throw new Error(`캘린더 목록 응답을 파싱하지 못했습니다: ${toErrorMessage(error)}`);
+    throw new Error(`Failed to parse calendar list response: ${toErrorMessage(error)}`);
   }
 }
 
-function parseListReminderListsOutput(stdout: string): ListReminderListsOutput {
+function parseListReminderListsOutput(response: string): ListReminderListsOutput {
   try {
-    const parsed = JSON.parse(stdout) as ListReminderListsOutput;
+    const parsed = JSON.parse(response) as ListReminderListsOutput;
     if (!Array.isArray(parsed.reminderLists)) {
       throw new Error("Invalid reminder lists payload");
     }
     return parsed;
   } catch (error) {
-    throw new Error(`미리알림 폴더 목록 응답을 파싱하지 못했습니다: ${toErrorMessage(error)}`);
+    throw new Error(`Failed to parse reminder list response: ${toErrorMessage(error)}`);
   }
 }
 
@@ -292,13 +334,46 @@ function toErrorMessage(error: unknown): string {
   if (error && typeof error === "object" && "stderr" in error) {
     const stderr = String((error as { stderr?: string }).stderr ?? "").trim();
     if (stderr) {
-      return stderr.replace(/^ERROR:\s*/u, "");
+      return withPermissionGuidance(stderr);
     }
   }
 
   if (error instanceof Error) {
-    return error.message;
+    return withPermissionGuidance(error.message);
   }
 
-  return String(error);
+  return withPermissionGuidance(String(error));
+}
+
+function normalizeRecurrencePayload(recurrence: CalendarRecurrence): CalendarRecurrencePayload {
+  const interval =
+    Number.isFinite(recurrence.interval) && (recurrence.interval ?? 0) > 0 ? (recurrence.interval ?? 1) : 1;
+  return {
+    frequency: recurrence.frequency,
+    interval,
+    weekday: recurrence.weekday,
+    dayOfMonth: recurrence.dayOfMonth,
+    end: recurrence.end,
+  };
+}
+
+function withPermissionGuidance(message: string): string {
+  const trimmed = message.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  if (REMINDER_PERMISSION_PATTERN.test(trimmed)) {
+    return appendGuide(trimmed, REMINDER_PERMISSION_GUIDE);
+  }
+
+  if (CALENDAR_PERMISSION_PATTERN.test(trimmed)) {
+    return appendGuide(trimmed, CALENDAR_PERMISSION_GUIDE);
+  }
+
+  return trimmed;
+}
+
+function appendGuide(message: string, guide: string): string {
+  return message.includes(guide) ? message : `${message} ${guide}`;
 }
