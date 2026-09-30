@@ -1,34 +1,53 @@
 # Korean Add Calendar (Raycast)
 
-한국어 자연어 문장을 파싱해서 Apple Calendar에 일정을 등록하는 Raycast 익스텐션입니다.
+Create Apple Calendar events or Apple Reminders from Korean schedule sentences.
 
-## 지원 예시
+![raycast2x](https://github.com/user-attachments/assets/72f3dc0d-e1ec-42d8-809e-b297242b4639)
+
+## Quick Start
+
+1. Run `Create Korean Schedule Item` in Raycast.
+2. Enter a Korean schedule sentence.
+3. Select the target (`Apple Calendar Event` or `Apple Reminder`) and destination list.
+4. Run one of the actions (`Create in Apple Calendar` / `Create in Reminders`).
+
+For full behavior details and parsing rules, see:
+
+- [Usage and Parsing Guide](docs/usage-and-parsing-guide.md)
+
+## Example Inputs
 
 - `내일 오후 3시에 회의`
 - `다음주 화요일 오전 10시 반에 강남에서 팀 미팅`
 - `3월 12일 점심 12시 30분에 점심 약속`
 - `오늘 19:00에 운동`
+- `내일 오후 4시부터 6시까지 회의`
+- `내일 6시 전에 제출`
+- `3일 안에 계약서 보내기`
+- `이번주 내 정산`
+- `3시간 이내 계약서 회신`
+- `오늘 중 결재`
+- `이번달 내 정산`
 
-## 동작 규칙
+## Behavior
 
-- 시간이 없으면 종일 일정으로 생성합니다.
-- 파싱된 시작 시각이 이미 과거이면 7일 뒤로 보정합니다 (원본 스크립트와 동일).
-- 캘린더 저장은 `assets/add_event.swift`에서 EventKit을 직접 호출합니다.
-- 등록 캘린더는 EventKit으로 불러온 목록에서 선택합니다.
-- 마지막으로 선택한 캘린더를 저장해 다음 실행 때 자동 복원합니다.
-- 장소는 별도 입력칸으로 직접 지정할 수 있고, 입력 시 문장 파싱 장소보다 우선합니다.
-- 액션에서 `등록 후 캘린더 열기`를 선택하면 생성 직후 Calendar 앱을 해당 일정 시각으로 엽니다.
-- 최초 1회 macOS 캘린더 권한 허용이 필요합니다.
+- If no time is provided, the item is created as all-day.
+- If a parsed weekday-only expression is in the past (for example, `월요일 3시`), it moves to the next week.
+- Event creation uses EventKit through `assets/add_event.swift`.
+- Reminder creation uses EventKit through `assets/add_reminder.swift`.
+- You can select the destination calendar or reminder list from writable EventKit lists.
+- The last selected target and destination are restored automatically.
+- The optional location field overrides the parsed location when provided.
+- Parse status, summary, and recommended target are shown above destination fields.
+- If a sentence only contains time (for example, `6시 직장인 미팅`), date defaults to today. If that time has already passed, it rolls to the next day.
+- Time ranges in the form `부터 ~까지` are supported.
+- Deadline patterns such as `까지/전에/전까지/이전`, `N일 안에/이내/내`, `N시간 안에/이내/내`, `오늘/내일/모레 중`, and `이번주/다음주/이번달/다음달 내` are supported.
+- Deadline sentences are interpreted as due points (not duration blocks).
+- Deadline intent defaults to `Apple Reminder` unless manually overridden.
+- You can use `Create and Open Calendar` to jump to the created event time in Calendar.app.
+- macOS Calendar and Reminders permissions are required on first use.
 
-## 개발
-
-```bash
-npm install
-npm run typecheck
-npm test
-```
-
-Raycast 개발 모드:
+## Development
 
 ```bash
 npx ray develop
